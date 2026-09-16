@@ -1,1089 +1,340 @@
-import React, { useState, useEffect } from "react";
-import { useNavigate, useLocation } from "react-router-dom";
+import React, { useCallback, useEffect, useMemo, useState } from "react";
+import { useLocation, useNavigate } from "react-router-dom";
 import {
   ArrowLeft,
-  Search,
+  CalendarDays,
   Download,
-  Calendar,
-  User,
-  BookOpen,
   Eye,
-  X,
   FileText,
-  Clock,
-  Users as UsersIcon,
-  Loader,
-  FolderOpen,
-  ExternalLink,
-  Maximize2,
-  Minimize2,
+  Search,
+  UploadCloud,
+  UserRound,
 } from "lucide-react";
-import { useTheme } from "../ThemeContext";
 import {
   getResources,
   incrementDownload,
   incrementView,
 } from "../../services/resourceService";
-import { getStoredUser, isAuthenticated } from "../../services/authService";
-import {
-  getDownloadUrl,
-  getPreviewUrl,
-  downloadFile,
-} from "../../services/supabaseStorage";
+import { getDownloadUrl, getPreviewUrl } from "../../services/supabaseStorage";
+import { EmptyState, ErrorState, LoadingState } from "../ui/States";
+import { useToast } from "../ui/ToastContext";
 
-const ResourceDetails = () => {
-  const navigate = useNavigate();
+const readContext = () => {
+  try {
+    return JSON.parse(localStorage.getItem("dashboardData")) || {};
+  } catch {
+    return {};
+  }
+};
+const flatten = (groups = {}) => Object.values(groups).flat();
+const fileKind = (type = "") => type.split("/").pop()?.toUpperCase() || "FILE";
+const date = (value) =>
+  new Intl.DateTimeFormat(undefined, { dateStyle: "medium" }).format(
+    new Date(value),
+  );
+
+export default function ResourceDetails() {
   const location = useLocation();
-  const { darkMode } = useTheme();
-
-  // State management for search, filters, and UI
-  const [searchTerm, setSearchTerm] = useState("");
-  const [selectedYear, setSelectedYear] = useState("All");
-  const [selectedResource, setSelectedResource] = useState(null);
-  const [showViewModal, setShowViewModal] = useState(false);
-  const [resources, setResources] = useState({});
-  const [loading, setLoading] = useState(true);
-  const [error, setError] = useState("");
-  const [downloadingId, setDownloadingId] = useState(null);
-  const [isFullscreen, setIsFullscreen] = useState(false);
-
-  // Retrieve resource type, department, and semester from navigation state or localStorage
+  const navigate = useNavigate();
+  const { notify } = useToast();
+  const saved = readContext();
   const resourceType =
     location.state?.resourceType ||
     localStorage.getItem("currentResourceType") ||
-    "Resources";
-
-  const department =
-    location.state?.department ||
-    JSON.parse(localStorage.getItem("dashboardData"))?.department;
-
-  const semester =
-    location.state?.semester ||
-    JSON.parse(localStorage.getItem("dashboardData"))?.semester;
-
-  // Persist current resource type in localStorage
+    "All";
+  const department = location.state?.department || saved.department;
+  const semester = location.state?.semester || saved.semester;
+  const departmentName = department?.name || department || "";
+  const [query, setQuery] = useState("");
+  const [year, setYear] = useState("All");
+  const [sort, setSort] = useState("recent");
+  const [selected, setSelected] = useState(null);
+  const [state, setState] = useState({ loading: true, error: "", items: [] });
   useEffect(() => {
-    if (resourceType) {
-      localStorage.setItem("currentResourceType", resourceType);
-    }
+    localStorage.setItem("currentResourceType", resourceType);
   }, [resourceType]);
-
-  // Fetch resources when resource type or year filter changes
-  useEffect(() => {
-    fetchResources();
-  }, [resourceType, selectedYear]);
-
-  /**
-   * Fetches resources from the database with applied filters
-   */
-  const fetchResources = async () => {
-    setLoading(true);
-    setError("");
+  const load = useCallback(async () => {
+    if (!departmentName || !semester) return;
+    setState((current) => ({ ...current, loading: true, error: "" }));
     try {
-      const departmentName = department?.name || department || "General";
-
-      const filters = {
-        resourceType: resourceType,
+      const data = await getResources({
+        resourceType,
         department: departmentName,
-        search: searchTerm,
-      };
-
-      // Add year filter if not "All"
-      if (selectedYear !== "All") {
-        filters.year = selectedYear;
-      }
-
-      const data = await getResources(filters);
-      setResources(data.resources || {});
-    } catch (err) {
-      setError(err.message);
-      console.error("Error fetching resources:", err);
-    } finally {
-      setLoading(false);
-    }
-  };
-
-  /**
-   * Handles search functionality
-   */
-  const handleSearch = () => {
-    fetchResources();
-  };
-
-  // Manage body scroll when modal is open/closed
-  useEffect(() => {
-    if (showViewModal) {
-      document.body.style.overflow = "hidden";
-    } else {
-      document.body.style.overflow = "unset";
-    }
-    return () => {
-      document.body.style.overflow = "unset";
-    };
-  }, [showViewModal]);
-
-  /**
-   * Navigates back to dashboard
-   */
-  const handleBack = () => {
-    navigate("/dashboard", { state: { department, semester } });
-  };
-
-  /**
-   * Handles upload button click with user authentication and validation
-   */
-  const handleUploadClick = () => {
-    if (!isAuthenticated()) {
-      alert("Please login to upload resources");
-      return;
-    }
-
-    const user = getStoredUser();
-    if (!user?.isVerified) {
-      alert(
-        "Please verify your email before uploading resources. Check your inbox for verification link."
+        semester,
+        ...(query && { search: query }),
+        ...(year !== "All" && { year }),
+      });
+      const items = flatten(data.resources);
+      setState({ loading: false, error: "", items });
+      setSelected(
+        (current) =>
+          items.find(
+            (item) =>
+              item._id === (current?._id || location.state?.selectedResourceId),
+          ) ||
+          items[0] ||
+          null,
       );
-      return;
+    } catch (error) {
+      setState({ loading: false, error: error.message, items: [] });
     }
-
-    // Validate required department and semester selection
-    if (!department) {
-      alert("Please select a department first");
-      navigate("/select-department");
-      return;
-    }
-
-    if (!semester) {
-      alert("Please select a semester first");
-      navigate("/select-semester", { state: { department } });
-      return;
-    }
-
-    // Navigate to upload modal with required data
-    navigate("/upload-modal", {
-      state: {
-        resourceType: resourceType || "Resource",
-        department: department.name || department,
-        semester: semester,
-      },
-    });
+  }, [
+    departmentName,
+    semester,
+    resourceType,
+    query,
+    year,
+    location.state?.selectedResourceId,
+  ]);
+  useEffect(() => {
+    const timer = setTimeout(load, 280);
+    return () => clearTimeout(timer);
+  }, [load]);
+  const items = useMemo(
+    () =>
+      [...state.items].sort((a, b) =>
+        sort === "popular"
+          ? (b.downloadCount || 0) - (a.downloadCount || 0)
+          : sort === "title"
+            ? a.title.localeCompare(b.title)
+            : new Date(b.createdAt) - new Date(a.createdAt),
+      ),
+    [state.items, sort],
+  );
+  const years = [...new Set(state.items.map((item) => item.year))].sort(
+    (a, b) => b - a,
+  );
+  const openPreview = async (item) => {
+    setSelected(item);
+    await incrementView(item._id);
   };
-
-  /**
-   * Navigates to user's posts page
-   */
-  const handleMyPostsClick = () => {
-    if (!isAuthenticated()) {
-      alert("Please login to view your posts");
-      return;
-    }
-    navigate("/my-posts", { state: { resourceType, department } });
-  };
-
-  /**
-   * Handles file download with download count increment
-   */
-  const handleDownload = async (item) => {
+  const download = async (item) => {
     try {
-      setDownloadingId(item._id);
-
-      // Increment download count in database
       await incrementDownload(item._id);
-
-      // Download file using storage service
-      const result = await downloadFile(
-        item.fileUrl,
-        item.fileName || `${item.title}.pdf`
+      window.open(
+        getDownloadUrl(item.fileUrl),
+        "_blank",
+        "noopener,noreferrer",
       );
-
-      if (!result.success) {
-        throw new Error(result.error || "Failed to download file");
-      }
-
-      // Refresh resources to show updated download count
-      fetchResources();
-    } catch (error) {
-      console.error("Download error:", error);
-      setError("Failed to download file. Please try again.");
-
-      // Fallback to direct download if primary method fails
-      try {
-        const downloadUrl = getDownloadUrl(item.fileUrl);
-        const link = document.createElement("a");
-        link.href = downloadUrl;
-        link.download = item.fileName || `${item.title}.pdf`;
-        link.target = "_blank";
-        document.body.appendChild(link);
-        link.click();
-        document.body.removeChild(link);
-
-        setError("");
-      } catch (fallbackError) {
-        console.error("Fallback download also failed:", fallbackError);
-        setError("Failed to download file. Please try again later.");
-      }
-    } finally {
-      setDownloadingId(null);
+    } catch {
+      notify("The download could not be started.", "error");
     }
   };
-
-  /**
-   * Handles resource viewing with view count increment
-   */
-  const handleView = async (item) => {
-    try {
-      await incrementView(item._id);
-      setSelectedResource(item);
-      setShowViewModal(true);
-      setIsFullscreen(false);
-      fetchResources(); // Refresh to show updated view count
-    } catch (error) {
-      console.error("View error:", error);
-      setSelectedResource(item);
-      setShowViewModal(true);
-      setIsFullscreen(false);
-    }
-  };
-
-  /**
-   * Opens resource preview in new tab
-   */
-  const handleOpenPreview = (fileUrl) => {
-    const previewUrl = getPreviewUrl(fileUrl);
-    window.open(previewUrl, "_blank");
-  };
-
-  /**
-   * Closes the view modal and resets state
-   */
-  const handleCloseModal = () => {
-    setShowViewModal(false);
-    setSelectedResource(null);
-    setIsFullscreen(false);
-  };
-
-  /**
-   * Handles modal backdrop click to close modal
-   */
-  const handleBackdropClick = (e) => {
-    if (e.target === e.currentTarget) {
-      handleCloseModal();
-    }
-  };
-
-  /**
-   * Toggles fullscreen mode for the modal
-   */
-  const toggleFullscreen = () => {
-    setIsFullscreen(!isFullscreen);
-  };
-
-  // Add escape key listener for modal navigation
-  useEffect(() => {
-    const handleEscape = (e) => {
-      if (e.key === "Escape") {
-        if (isFullscreen) {
-          setIsFullscreen(false);
-        } else {
-          handleCloseModal();
-        }
-      }
-    };
-
-    if (showViewModal) {
-      document.addEventListener("keydown", handleEscape);
-    }
-
-    return () => {
-      document.removeEventListener("keydown", handleEscape);
-    };
-  }, [showViewModal, isFullscreen]);
-
-  // Extract available years from resources for filter dropdown
-  const years = ["All", ...Object.keys(resources).sort((a, b) => b - a)];
-
-  return (
-    <div
-      className={`min-h-screen pt-24 pb-20 ${
-        darkMode ? "bg-gray-900" : "bg-gray-50"
-      }`}
-    >
-      <div className="max-w-6xl mx-auto px-4 sm:px-6">
-        {/* Header with navigation and action buttons */}
-        <div className="flex flex-col md:flex-row items-start md:items-center justify-between mb-8 gap-4">
-          <button
-            onClick={handleBack}
-            className={`group flex items-center gap-2 px-4 py-2 rounded-lg font-medium transition-all ${
-              darkMode
-                ? "text-gray-300 hover:text-white hover:bg-gray-800"
-                : "text-gray-700 hover:text-gray-900 hover:bg-gray-200"
-            }`}
-          >
-            <ArrowLeft className="w-5 h-5 group-hover:-translate-x-1 transition-transform" />
-            <span>Back to Dashboard</span>
-          </button>
-
-          <div className="flex flex-wrap gap-3">
-            {isAuthenticated() && (
-              <button
-                onClick={handleMyPostsClick}
-                className="flex items-center space-x-2 px-4 sm:px-6 py-3 bg-gradient-to-r from-purple-600 to-pink-600 text-white rounded-xl font-medium hover:shadow-lg transition-all text-sm sm:text-base"
-              >
-                <FolderOpen className="w-4 h-4 sm:w-5 sm:h-5" />
-                <span>My Posts</span>
-              </button>
-            )}
+  if (!departmentName || !semester)
+    return (
+      <div className="page-narrow page">
+        <EmptyState
+          title="Choose your study context"
+          message="Select a department and semester before browsing resources."
+          action={
             <button
-              onClick={handleUploadClick}
-              className="flex items-center space-x-2 px-4 sm:px-6 py-3 bg-gradient-to-r from-blue-600 to-purple-600 text-white rounded-xl font-medium hover:shadow-lg transition-all text-sm sm:text-base"
+              className="btn btn-primary"
+              onClick={() => navigate("/select-department")}
             >
-              <span>Upload {resourceType}</span>
+              Choose department
             </button>
-          </div>
-        </div>
-
-        {/* Page title and description */}
-        <div className="text-center mb-8">
-          <h1
-            className={`text-2xl sm:text-3xl md:text-4xl font-bold mb-2 ${
-              darkMode ? "text-white" : "text-gray-900"
-            }`}
-          >
-            {resourceType}
-          </h1>
-          <p
-            className={`text-sm sm:text-lg ${
-              darkMode ? "text-gray-400" : "text-gray-600"
-            }`}
-          >
-            {department?.name || department} -{" "}
-            {semester && `Semester ${semester} - `}
-            Browse and download {resourceType.toLowerCase()}
-          </p>
-        </div>
-
-        {/* Search and filter section */}
-        <div
-          className={`p-4 sm:p-6 rounded-2xl mb-8 ${
-            darkMode
-              ? "bg-gray-800 border border-gray-700"
-              : "bg-white border border-gray-200"
-          }`}
-        >
-          <div className="flex flex-col md:flex-row gap-4 items-center justify-between">
-            <div className="flex-1 w-full md:w-auto">
-              <div className="relative">
-                <Search
-                  className={`absolute left-3 top-1/2 transform -translate-y-1/2 w-4 h-4 sm:w-5 sm:h-5 ${
-                    darkMode ? "text-gray-400" : "text-gray-500"
-                  }`}
-                />
-                <input
-                  type="text"
-                  placeholder="Search by course name, title, or description..."
-                  value={searchTerm}
-                  onChange={(e) => setSearchTerm(e.target.value)}
-                  onKeyPress={(e) => e.key === "Enter" && handleSearch()}
-                  className={`w-full pl-10 pr-4 py-2 sm:py-3 rounded-lg outline-none transition-all text-sm sm:text-base ${
-                    darkMode
-                      ? "bg-gray-750 text-white placeholder-gray-500 focus:ring-2 focus:ring-blue-500"
-                      : "bg-gray-100 text-gray-900 placeholder-gray-500 focus:ring-2 focus:ring-blue-500"
-                  }`}
-                />
-              </div>
-            </div>
-
-            <div className="flex flex-col sm:flex-row items-center gap-3 w-full sm:w-auto">
-              <span
-                className={`font-medium text-sm sm:text-base ${
-                  darkMode ? "text-gray-300" : "text-gray-700"
-                }`}
-              >
-                Filter by Year:
-              </span>
-              <select
-                value={selectedYear}
-                onChange={(e) => setSelectedYear(e.target.value)}
-                className={`px-3 sm:px-4 py-2 sm:py-3 rounded-lg outline-none transition-all text-sm sm:text-base w-full sm:w-auto ${
-                  darkMode
-                    ? "bg-gray-750 text-white border border-gray-600"
-                    : "bg-gray-100 text-gray-900 border border-gray-300"
-                }`}
-              >
-                {years.map((year) => (
-                  <option key={year} value={year}>
-                    {year}
-                  </option>
-                ))}
-              </select>
-              <button
-                onClick={handleSearch}
-                className="px-4 sm:px-6 py-2 sm:py-3 bg-blue-600 hover:bg-blue-700 text-white rounded-lg font-medium transition-all text-sm sm:text-base w-full sm:w-auto"
-              >
-                Search
-              </button>
-            </div>
-          </div>
-        </div>
-
-        {/* Loading state */}
-        {loading && (
-          <div className="flex justify-center items-center py-20">
-            <Loader className="w-8 h-8 animate-spin text-blue-600" />
-          </div>
-        )}
-
-        {/* Error state */}
-        {error && (
-          <div className="p-4 sm:p-6 rounded-xl bg-red-50 dark:bg-red-900/20 border border-red-200 dark:border-red-800 mb-8">
-            <p className="text-red-600 dark:text-red-400 text-sm sm:text-base">
-              {error}
-            </p>
-            <button
-              onClick={() => setError("")}
-              className="mt-2 px-4 py-2 bg-red-600 text-white rounded-lg hover:bg-red-700 transition-all text-sm"
-            >
-              Dismiss
-            </button>
-          </div>
-        )}
-
-        {/* Resources list */}
-        {!loading && !error && (
-          <div className="space-y-6 sm:space-y-8">
-            {Object.keys(resources).length > 0 ? (
-              Object.keys(resources)
-                .sort((a, b) => b - a)
-                .map((year) => (
-                  <div key={year}>
-                    <h2
-                      className={`text-xl sm:text-2xl font-bold mb-4 sm:mb-6 pb-2 border-b ${
-                        darkMode
-                          ? "text-white border-gray-700"
-                          : "text-gray-900 border-gray-300"
-                      }`}
-                    >
-                      {year}
-                    </h2>
-                    <div className="grid gap-4 sm:gap-6">
-                      {resources[year].map((item) => (
-                        <div
-                          key={item._id}
-                          className={`p-4 sm:p-6 rounded-2xl transition-all hover:scale-[1.02] ${
-                            darkMode
-                              ? "bg-gray-800 border border-gray-700 hover:bg-gray-750"
-                              : "bg-white border border-gray-200 hover:shadow-xl"
-                          }`}
-                        >
-                          <div className="flex flex-col sm:flex-row sm:items-start justify-between gap-4">
-                            <div className="flex-1">
-                              <div className="flex items-center space-x-2 sm:space-x-3 mb-2">
-                                <BookOpen
-                                  className={`w-4 h-4 sm:w-5 sm:h-5 ${
-                                    darkMode ? "text-blue-400" : "text-blue-600"
-                                  }`}
-                                />
-                                <h3
-                                  className={`text-lg sm:text-xl font-bold ${
-                                    darkMode ? "text-white" : "text-gray-900"
-                                  }`}
-                                >
-                                  {item.title}
-                                </h3>
-                              </div>
-                              <p
-                                className={`text-xs sm:text-sm mb-1 ${
-                                  darkMode ? "text-gray-400" : "text-gray-600"
-                                }`}
-                              >
-                                Course: {item.courseName}
-                              </p>
-                              <p
-                                className={`text-sm sm:text-base mb-4 ${
-                                  darkMode ? "text-gray-300" : "text-gray-700"
-                                }`}
-                              >
-                                {item.description}
-                              </p>
-                            </div>
-                            <div className="flex flex-row sm:flex-col space-x-2 sm:space-x-0 sm:space-y-2">
-                              <button
-                                onClick={() => handleView(item)}
-                                className={`flex items-center space-x-2 px-3 sm:px-4 py-2 rounded-lg transition-all text-sm ${
-                                  darkMode
-                                    ? "bg-blue-600 hover:bg-blue-700 text-white"
-                                    : "bg-blue-500 hover:bg-blue-600 text-white"
-                                }`}
-                              >
-                                <Eye className="w-3 h-3 sm:w-4 sm:h-4" />
-                                <span>View</span>
-                              </button>
-                              <button
-                                onClick={() => handleDownload(item)}
-                                disabled={downloadingId === item._id}
-                                className={`flex items-center space-x-2 px-3 sm:px-4 py-2 rounded-lg transition-all text-sm ${
-                                  downloadingId === item._id
-                                    ? "opacity-50 cursor-not-allowed"
-                                    : ""
-                                } ${
-                                  darkMode
-                                    ? "bg-gray-700 hover:bg-gray-600 text-white"
-                                    : "bg-gray-200 hover:bg-gray-300 text-gray-700"
-                                }`}
-                              >
-                                {downloadingId === item._id ? (
-                                  <Loader className="w-3 h-3 sm:w-4 sm:h-4 animate-spin" />
-                                ) : (
-                                  <Download className="w-3 h-3 sm:w-4 sm:h-4" />
-                                )}
-                                <span>
-                                  {downloadingId === item._id
-                                    ? "Downloading..."
-                                    : "Download"}
-                                </span>
-                              </button>
-                            </div>
-                          </div>
-
-                          {/* Resource metadata */}
-                          <div className="flex flex-wrap gap-2 sm:gap-4 text-xs sm:text-sm mt-4">
-                            <div className="flex items-center space-x-1 sm:space-x-2">
-                              <User
-                                className={`w-3 h-3 sm:w-4 sm:h-4 ${
-                                  darkMode ? "text-gray-400" : "text-gray-500"
-                                }`}
-                              />
-                              <span
-                                className={
-                                  darkMode ? "text-gray-400" : "text-gray-600"
-                                }
-                              >
-                                {item.uploaderName}
-                              </span>
-                            </div>
-                            <div className="flex items-center space-x-1 sm:space-x-2">
-                              <Calendar
-                                className={`w-3 h-3 sm:w-4 sm:h-4 ${
-                                  darkMode ? "text-gray-400" : "text-gray-500"
-                                }`}
-                              />
-                              <span
-                                className={
-                                  darkMode ? "text-gray-400" : "text-gray-600"
-                                }
-                              >
-                                {new Date(item.createdAt).toLocaleDateString()}
-                              </span>
-                            </div>
-                            <span
-                              className={`px-2 py-1 rounded-full text-xs font-medium ${
-                                darkMode
-                                  ? "bg-gray-700 text-gray-300"
-                                  : "bg-gray-200 text-gray-700"
-                              }`}
-                            >
-                              Section {item.section}
-                            </span>
-                            <span
-                              className={`px-2 py-1 rounded-full text-xs font-medium ${
-                                darkMode
-                                  ? "bg-gray-700 text-gray-300"
-                                  : "bg-gray-200 text-gray-700"
-                              }`}
-                            >
-                              Batch {item.batch}
-                            </span>
-                            <span
-                              className={`px-2 py-1 rounded-full text-xs font-medium ${
-                                darkMode
-                                  ? "bg-blue-900/30 text-blue-400"
-                                  : "bg-blue-100 text-blue-700"
-                              }`}
-                            >
-                              📥 {item.downloadCount} downloads
-                            </span>
-                            <span
-                              className={`px-2 py-1 rounded-full text-xs font-medium ${
-                                darkMode
-                                  ? "bg-purple-900/30 text-purple-400"
-                                  : "bg-purple-100 text-purple-700"
-                              }`}
-                            >
-                              👁️ {item.viewCount} views
-                            </span>
-                          </div>
-                        </div>
-                      ))}
-                    </div>
-                  </div>
-                ))
-            ) : (
-              <div
-                className={`text-center py-8 sm:py-12 rounded-2xl ${
-                  darkMode ? "bg-gray-800" : "bg-white"
-                }`}
-              >
-                <BookOpen
-                  className={`w-12 h-12 sm:w-16 sm:h-16 mx-auto mb-4 ${
-                    darkMode ? "text-gray-600" : "text-gray-400"
-                  }`}
-                />
-                <h3
-                  className={`text-lg sm:text-xl font-bold mb-2 ${
-                    darkMode ? "text-white" : "text-gray-900"
-                  }`}
-                >
-                  No {resourceType.toLowerCase()} found
-                </h3>
-                <p
-                  className={`text-sm sm:text-base ${
-                    darkMode ? "text-gray-400" : "text-gray-600"
-                  }`}
-                >
-                  Be the first to upload {resourceType.toLowerCase()} for{" "}
-                  {department?.name || department}!
-                </p>
-                <button
-                  onClick={handleUploadClick}
-                  className="mt-4 px-4 sm:px-6 py-2 sm:py-3 bg-gradient-to-r from-blue-600 to-purple-600 text-white rounded-xl font-medium hover:shadow-lg transition-all text-sm sm:text-base"
-                >
-                  Upload Now
-                </button>
-              </div>
-            )}
-          </div>
-        )}
+          }
+        />
       </div>
-
-      {/* Resource View Modal */}
-      {showViewModal && selectedResource && (
-        <div
-          className="fixed inset-0 z-50 flex items-center justify-center p-2 sm:p-4"
-          onClick={handleBackdropClick}
-        >
-          <div className="absolute inset-0 bg-black/60 backdrop-blur-md" />
-
-          <div
-            className={`relative w-full ${
-              isFullscreen
-                ? "h-full max-w-none rounded-none"
-                : "max-w-4xl h-auto max-h-[90vh] rounded-2xl"
-            } shadow-2xl transform transition-all duration-300 ${
-              darkMode ? "bg-gray-800" : "bg-white"
-            }`}
-            onClick={(e) => e.stopPropagation()}
+    );
+  return (
+    <div className="container page">
+      <div className="page-header">
+        <div>
+          <button
+            className="btn btn-ghost btn-sm"
+            onClick={() =>
+              navigate("/dashboard", { state: { department, semester } })
+            }
           >
-            {/* Modal Header */}
-            <div
-              className={`flex items-center justify-between p-4 sm:p-6 border-b ${
-                darkMode
-                  ? "bg-gray-800 border-gray-700"
-                  : "bg-white border-gray-200"
-              } ${isFullscreen ? "rounded-t-none" : "rounded-t-2xl"}`}
-            >
-              <div className="flex-1 min-w-0">
-                <h2
-                  className={`text-lg sm:text-xl md:text-2xl font-bold mb-1 truncate ${
-                    darkMode ? "text-white" : "text-gray-900"
-                  }`}
-                >
-                  {selectedResource.title}
-                </h2>
-                <p
-                  className={`text-sm sm:text-lg truncate ${
-                    darkMode ? "text-gray-400" : "text-gray-600"
-                  }`}
-                >
-                  {selectedResource.courseName}
-                </p>
-              </div>
-              <div className="flex items-center space-x-2 ml-4">
-                <button
-                  onClick={toggleFullscreen}
-                  className={`p-2 rounded-xl transition-all hover:scale-110 ${
-                    darkMode
-                      ? "text-gray-400 hover:bg-gray-700 hover:text-white"
-                      : "text-gray-500 hover:bg-gray-200 hover:text-gray-700"
-                  }`}
-                >
-                  {isFullscreen ? (
-                    <Minimize2 className="w-4 h-4 sm:w-5 sm:h-5" />
-                  ) : (
-                    <Maximize2 className="w-4 h-4 sm:w-5 sm:h-5" />
-                  )}
-                </button>
-                <button
-                  onClick={handleCloseModal}
-                  className={`p-2 sm:p-3 rounded-xl transition-all hover:scale-110 ${
-                    darkMode
-                      ? "text-gray-400 hover:bg-gray-700 hover:text-white"
-                      : "text-gray-500 hover:bg-gray-200 hover:text-gray-700"
-                  }`}
-                >
-                  <X className="w-4 h-4 sm:w-6 sm:h-6" />
-                </button>
-              </div>
-            </div>
-
-            {/* Modal Content */}
-            <div
-              className={`p-4 sm:p-6 ${
-                isFullscreen
-                  ? "h-[calc(100%-80px)] overflow-auto"
-                  : "max-h-[60vh] overflow-auto"
-              }`}
-            >
-              <div
-                className={`grid gap-4 sm:gap-8 ${
-                  isFullscreen ? "grid-cols-1 lg:grid-cols-2" : "grid-cols-1"
-                }`}
-              >
-                {/* Preview Section */}
-                <div>
-                  <h3
-                    className={`text-lg sm:text-xl font-semibold mb-3 sm:mb-4 ${
-                      darkMode ? "text-white" : "text-gray-900"
-                    }`}
-                  >
-                    Resource Preview
-                  </h3>
-                  <div
-                    className={`rounded-xl overflow-hidden border-2 cursor-pointer hover:opacity-90 transition-opacity ${
-                      darkMode ? "border-gray-600" : "border-gray-300"
-                    }`}
-                    onClick={() => handleOpenPreview(selectedResource.fileUrl)}
-                  >
-                    {selectedResource.thumbnailUrl ? (
-                      <div className="relative">
-                        <img
-                          src={selectedResource.thumbnailUrl}
-                          alt={selectedResource.title}
-                          className="w-full h-48 sm:h-64 object-cover"
-                          onError={(e) => {
-                            e.target.src =
-                              "https://via.placeholder.com/800x400/374151/9CA3AF?text=Preview+Not+Available";
-                          }}
-                        />
-                        <div className="absolute inset-0 flex items-center justify-center bg-black/30 opacity-0 hover:opacity-100 transition-opacity">
-                          <ExternalLink className="w-8 h-8 sm:w-12 sm:h-12 text-white" />
-                        </div>
-                      </div>
-                    ) : (
-                      <div
-                        className={`w-full h-48 sm:h-64 flex flex-col items-center justify-center ${
-                          darkMode ? "bg-gray-700" : "bg-gray-100"
-                        }`}
-                      >
-                        <FileText
-                          className={`w-12 h-12 sm:w-20 sm:h-20 mb-3 sm:mb-4 ${
-                            darkMode ? "text-gray-600" : "text-gray-400"
-                          }`}
-                        />
-                        <p
-                          className={`text-xs sm:text-sm text-center ${
-                            darkMode ? "text-gray-400" : "text-gray-600"
-                          }`}
-                        >
-                          Click here to open file
-                        </p>
-                        <ExternalLink
-                          className={`w-4 h-4 sm:w-5 sm:h-5 mt-1 sm:mt-2 ${
-                            darkMode ? "text-gray-500" : "text-gray-400"
-                          }`}
-                        />
-                      </div>
-                    )}
-                  </div>
-
-                  {/* Quick Stats */}
-                  <div className="grid grid-cols-3 gap-2 sm:gap-4 mt-4 sm:mt-6">
-                    <div
-                      className={`text-center p-2 sm:p-3 rounded-lg ${
-                        darkMode ? "bg-gray-700" : "bg-gray-100"
-                      }`}
-                    >
-                      <FileText
-                        className={`w-4 h-4 sm:w-6 sm:h-6 mx-auto mb-1 sm:mb-2 ${
-                          darkMode ? "text-blue-400" : "text-blue-600"
-                        }`}
-                      />
-                      <div
-                        className={`text-xs sm:text-sm font-medium ${
-                          darkMode ? "text-gray-300" : "text-gray-700"
-                        }`}
-                      >
-                        {selectedResource.pages || "N/A"} Pages
-                      </div>
-                    </div>
-                    <div
-                      className={`text-center p-2 sm:p-3 rounded-lg ${
-                        darkMode ? "bg-gray-700" : "bg-gray-100"
-                      }`}
-                    >
-                      <Clock
-                        className={`w-4 h-4 sm:w-6 sm:h-6 mx-auto mb-1 sm:mb-2 ${
-                          darkMode ? "text-green-400" : "text-green-600"
-                        }`}
-                      />
-                      <div
-                        className={`text-xs sm:text-sm font-medium ${
-                          darkMode ? "text-gray-300" : "text-gray-700"
-                        }`}
-                      >
-                        {selectedResource.fileSize}
-                      </div>
-                    </div>
-                    <div
-                      className={`text-center p-2 sm:p-3 rounded-lg ${
-                        darkMode ? "bg-gray-700" : "bg-gray-100"
-                      }`}
-                    >
-                      <UsersIcon
-                        className={`w-4 h-4 sm:w-6 sm:h-6 mx-auto mb-1 sm:mb-2 ${
-                          darkMode ? "text-purple-400" : "text-purple-600"
-                        }`}
-                      />
-                      <div
-                        className={`text-xs sm:text-sm font-medium ${
-                          darkMode ? "text-gray-300" : "text-gray-700"
-                        }`}
-                      >
-                        Sec {selectedResource.section}
-                      </div>
-                    </div>
-                  </div>
-                </div>
-
-                {/* Details Section */}
-                <div>
-                  <h3
-                    className={`text-lg sm:text-xl font-semibold mb-3 sm:mb-4 ${
-                      darkMode ? "text-white" : "text-gray-900"
-                    }`}
-                  >
-                    Resource Details
-                  </h3>
-
-                  <div className="space-y-4 sm:space-y-6">
-                    <div>
-                      <h4
-                        className={`font-semibold mb-2 text-sm sm:text-base ${
-                          darkMode ? "text-gray-300" : "text-gray-700"
-                        }`}
-                      >
-                        Description
-                      </h4>
-                      <p
-                        className={`leading-relaxed text-sm sm:text-base ${
-                          darkMode ? "text-gray-300" : "text-gray-700"
-                        }`}
-                      >
-                        {selectedResource.description}
-                      </p>
-                    </div>
-
-                    <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 sm:gap-4">
-                      <div>
-                        <h4
-                          className={`font-semibold mb-2 text-sm sm:text-base ${
-                            darkMode ? "text-gray-300" : "text-gray-700"
-                          }`}
-                        >
-                          Uploaded By
-                        </h4>
-                        <div className="flex items-center space-x-2">
-                          <User
-                            className={`w-3 h-3 sm:w-4 sm:h-4 ${
-                              darkMode ? "text-gray-400" : "text-gray-500"
-                            }`}
-                          />
-                          <span
-                            className={`text-sm sm:text-base ${
-                              darkMode ? "text-white" : "text-gray-900"
-                            }`}
-                          >
-                            {selectedResource.uploaderName}
-                          </span>
-                        </div>
-                      </div>
-                      <div>
-                        <h4
-                          className={`font-semibold mb-2 text-sm sm:text-base ${
-                            darkMode ? "text-gray-300" : "text-gray-700"
-                          }`}
-                        >
-                          Upload Date
-                        </h4>
-                        <div className="flex items-center space-x-2">
-                          <Calendar
-                            className={`w-3 h-3 sm:w-4 sm:h-4 ${
-                              darkMode ? "text-gray-400" : "text-gray-500"
-                            }`}
-                          />
-                          <span
-                            className={`text-sm sm:text-base ${
-                              darkMode ? "text-white" : "text-gray-900"
-                            }`}
-                          >
-                            {new Date(
-                              selectedResource.createdAt
-                            ).toLocaleDateString("en-US", {
-                              year: "numeric",
-                              month: "long",
-                              day: "numeric",
-                            })}
-                          </span>
-                        </div>
-                      </div>
-                    </div>
-
-                    <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 sm:gap-4">
-                      <div>
-                        <h4
-                          className={`font-semibold mb-2 text-sm sm:text-base ${
-                            darkMode ? "text-gray-300" : "text-gray-700"
-                          }`}
-                        >
-                          Section
-                        </h4>
-                        <span
-                          className={`px-2 sm:px-3 py-1 rounded-full text-xs sm:text-sm font-medium ${
-                            darkMode
-                              ? "bg-blue-600 text-white"
-                              : "bg-blue-100 text-blue-800"
-                          }`}
-                        >
-                          {selectedResource.section}
-                        </span>
-                      </div>
-                      <div>
-                        <h4
-                          className={`font-semibold mb-2 text-sm sm:text-base ${
-                            darkMode ? "text-gray-300" : "text-gray-700"
-                          }`}
-                        >
-                          Batch
-                        </h4>
-                        <span
-                          className={`px-2 sm:px-3 py-1 rounded-full text-xs sm:text-sm font-medium ${
-                            darkMode
-                              ? "bg-purple-600 text-white"
-                              : "bg-purple-100 text-purple-800"
-                          }`}
-                        >
-                          {selectedResource.batch}
-                        </span>
-                      </div>
-                    </div>
-
-                    <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 sm:gap-4">
-                      <div>
-                        <h4
-                          className={`font-semibold mb-2 text-sm sm:text-base ${
-                            darkMode ? "text-gray-300" : "text-gray-700"
-                          }`}
-                        >
-                          Downloads
-                        </h4>
-                        <span
-                          className={`px-2 sm:px-3 py-1 rounded-full text-xs sm:text-sm font-medium ${
-                            darkMode
-                              ? "bg-green-600 text-white"
-                              : "bg-green-100 text-green-800"
-                          }`}
-                        >
-                          📥 {selectedResource.downloadCount}
-                        </span>
-                      </div>
-                      <div>
-                        <h4
-                          className={`font-semibold mb-2 text-sm sm:text-base ${
-                            darkMode ? "text-gray-300" : "text-gray-700"
-                          }`}
-                        >
-                          Views
-                        </h4>
-                        <span
-                          className={`px-2 sm:px-3 py-1 rounded-full text-xs sm:text-sm font-medium ${
-                            darkMode
-                              ? "bg-orange-600 text-white"
-                              : "bg-orange-100 text-orange-800"
-                          }`}
-                        >
-                          👁️ {selectedResource.viewCount}
-                        </span>
-                      </div>
-                    </div>
-
-                    {/* Department Information */}
-                    <div>
-                      <h4
-                        className={`font-semibold mb-2 text-sm sm:text-base ${
-                          darkMode ? "text-gray-300" : "text-gray-700"
-                        }`}
-                      >
-                        Department
-                      </h4>
-                      <span
-                        className={`px-2 sm:px-3 py-1 rounded-full text-xs sm:text-sm font-medium ${
-                          darkMode
-                            ? "bg-indigo-600 text-white"
-                            : "bg-indigo-100 text-indigo-800"
-                        }`}
-                      >
-                        {selectedResource.department}
-                      </span>
-                    </div>
-                  </div>
-                </div>
-              </div>
-            </div>
-
-            {/* Modal Footer */}
-            <div
-              className={`flex flex-col sm:flex-row justify-end space-y-3 sm:space-y-0 sm:space-x-4 p-4 sm:p-6 border-t ${
-                darkMode
-                  ? "bg-gray-800 border-gray-700"
-                  : "bg-white border-gray-200"
-              } ${isFullscreen ? "rounded-b-none" : "rounded-b-2xl"}`}
-            >
-              <button
-                onClick={handleCloseModal}
-                className={`px-4 sm:px-8 py-2 sm:py-3 rounded-xl font-medium transition-all text-sm sm:text-base ${
-                  darkMode
-                    ? "bg-gray-700 text-white hover:bg-gray-600"
-                    : "bg-gray-200 text-gray-700 hover:bg-gray-300"
-                }`}
-              >
-                Close
-              </button>
-              <button
-                onClick={() => handleDownload(selectedResource)}
-                disabled={downloadingId === selectedResource._id}
-                className={`flex items-center justify-center space-x-2 px-4 sm:px-8 py-2 sm:py-3 bg-gradient-to-r from-blue-600 to-purple-600 text-white rounded-xl font-medium hover:shadow-lg transition-all hover:scale-105 text-sm sm:text-base ${
-                  downloadingId === selectedResource._id
-                    ? "opacity-50 cursor-not-allowed"
-                    : ""
-                }`}
-              >
-                {downloadingId === selectedResource._id ? (
-                  <>
-                    <Loader className="w-4 h-4 sm:w-5 sm:h-5 animate-spin" />
-                    <span>Downloading...</span>
-                  </>
-                ) : (
-                  <>
-                    <Download className="w-4 h-4 sm:w-5 sm:h-5" />
-                    <span>Download Resource</span>
-                  </>
-                )}
-              </button>
-            </div>
+            <ArrowLeft size={16} /> Dashboard
+          </button>
+          <h1 className="page-title">{resourceType}</h1>
+          <div className="context-pills">
+            <span className="badge badge-brand">{departmentName}</span>
+            <span className="badge">Semester {semester}</span>
+            <span className="badge">{state.items.length} resources</span>
           </div>
+        </div>
+        <div className="cluster">
+          <button
+            className="btn btn-secondary"
+            onClick={() => navigate("/my-posts")}
+          >
+            My uploads
+          </button>
+          <button
+            className="btn btn-primary"
+            onClick={() =>
+              navigate("/upload-modal", {
+                state: { resourceType, department, semester },
+              })
+            }
+          >
+            <UploadCloud size={17} /> Upload
+          </button>
+        </div>
+      </div>
+      <div className="toolbar">
+        <div className="input-wrap">
+          <Search />
+          <input
+            className="input"
+            type="search"
+            placeholder={`Search ${resourceType.toLowerCase()}`}
+            value={query}
+            onChange={(event) => setQuery(event.target.value)}
+            aria-label="Search resources"
+          />
+        </div>
+        <select
+          className="select"
+          value={year}
+          onChange={(event) => setYear(event.target.value)}
+          aria-label="Filter by year"
+        >
+          <option>All</option>
+          {years.map((value) => (
+            <option key={value}>{value}</option>
+          ))}
+        </select>
+        <select
+          className="select"
+          value={sort}
+          onChange={(event) => setSort(event.target.value)}
+          aria-label="Sort resources"
+        >
+          <option value="recent">Newest first</option>
+          <option value="popular">Most downloaded</option>
+          <option value="title">Title A–Z</option>
+        </select>
+      </div>
+      {state.loading ? (
+        <LoadingState label="Loading resources" rows={5} />
+      ) : state.error ? (
+        <ErrorState message={state.error} onRetry={load} />
+      ) : items.length === 0 ? (
+        <EmptyState
+          title={query ? "No matching resources" : "No resources yet"}
+          message={
+            query
+              ? "Try a different search or year."
+              : `Be the first to share ${resourceType.toLowerCase()} for this semester.`
+          }
+          action={
+            <button
+              className="btn btn-primary"
+              onClick={() =>
+                navigate("/upload-modal", {
+                  state: { resourceType, department, semester },
+                })
+              }
+            >
+              Upload resource
+            </button>
+          }
+        />
+      ) : (
+        <div className="browser-layout">
+          <div className="resource-list">
+            {items.map((item) => (
+              <article
+                className="resource-row card-interactive"
+                key={item._id}
+                style={
+                  selected?._id === item._id
+                    ? { borderColor: "var(--brand)" }
+                    : undefined
+                }
+              >
+                <span className="icon-box">
+                  <FileText size={20} />
+                </span>
+                <div>
+                  <h3>{item.title}</h3>
+                  <div className="resource-meta">
+                    <span>{item.courseName}</span>
+                    <span>
+                      <UserRound size={13} />
+                      {item.uploaderName}
+                    </span>
+                    <span>
+                      <CalendarDays size={13} />
+                      {date(item.createdAt)}
+                    </span>
+                    <span>{fileKind(item.fileType)}</span>
+                  </div>
+                </div>
+                <button
+                  className="btn btn-secondary btn-sm"
+                  onClick={() => openPreview(item)}
+                >
+                  Preview
+                </button>
+              </article>
+            ))}
+          </div>
+          <aside
+            className="card card-pad preview-pane"
+            aria-label="Resource preview"
+          >
+            {selected ? (
+              <div className="stack">
+                <div>
+                  <span className="eyebrow">Selected resource</span>
+                  <h2 className="section-title" style={{ marginTop: 5 }}>
+                    {selected.title}
+                  </h2>
+                  <p className="page-copy">{selected.description}</p>
+                </div>
+                <div className="resource-meta">
+                  <span>{selected.courseName}</span>
+                  <span>{selected.fileSize}</span>
+                  <span>
+                    <Eye size={13} />
+                    {selected.viewCount || 0} views
+                  </span>
+                  <span>
+                    <Download size={13} />
+                    {selected.downloadCount || 0} downloads
+                  </span>
+                </div>
+                {selected.fileType === "application/pdf" ? (
+                  <iframe
+                    className="preview-frame"
+                    title={`Preview of ${selected.title}`}
+                    src={getPreviewUrl(selected.fileUrl)}
+                  />
+                ) : (
+                  <div className="state" style={{ minHeight: 220 }}>
+                    <div>
+                      <FileText size={34} className="muted" />
+                      <h3>Preview in a new tab</h3>
+                      <p>This file type uses your browser or desktop app.</p>
+                    </div>
+                  </div>
+                )}
+                <div className="cluster">
+                  <a
+                    className="btn btn-secondary"
+                    href={getPreviewUrl(selected.fileUrl)}
+                    target="_blank"
+                    rel="noreferrer"
+                  >
+                    <Eye size={17} /> Open
+                  </a>
+                  <button
+                    className="btn btn-primary"
+                    onClick={() => download(selected)}
+                  >
+                    <Download size={17} /> Download
+                  </button>
+                </div>
+              </div>
+            ) : null}
+          </aside>
         </div>
       )}
     </div>
   );
-};
-
-export default ResourceDetails;
+}

@@ -11,11 +11,24 @@ const {
   passwordResetSuccessEmail,
   accountLockedEmail,
 } = require("../utils/emailTemplates");
+const { sendServerError } = require("../utils/httpError");
+
+const sendEmailSafely = async (options) => {
+  try {
+    await sendEmail(options);
+    return true;
+  } catch (error) {
+    if (process.env.NODE_ENV === "development") {
+      console.error(`Email delivery failed: ${error.message}`);
+    }
+    return false;
+  }
+};
 
 // Simple token generator for Google OAuth (no HTTP-only cookies)
 const generateSimpleToken = (userId) => {
   return jwt.sign({ id: userId }, process.env.JWT_SECRET, {
-    expiresIn: "7d",
+    expiresIn: process.env.JWT_EXPIRE,
   });
 };
 
@@ -45,7 +58,7 @@ const register = async (req, res) => {
 
     const verificationUrl = `${process.env.FRONTEND_URL}/verify-email/${verificationToken}`;
 
-    await sendEmail({
+    const emailSent = await sendEmailSafely({
       email: user.email,
       subject: "Verify Your Email - Unibro",
       html: verificationEmail(user.fullName, verificationUrl),
@@ -55,8 +68,10 @@ const register = async (req, res) => {
 
     res.status(201).json({
       success: true,
-      message:
-        "Registration successful! Please check your email to verify your account.",
+      message: emailSent
+        ? "Registration successful! Please check your email to verify your account."
+        : "Registration successful, but the verification email could not be delivered. Use resend verification after signing in.",
+      emailSent,
       token,
       user: {
         _id: user._id,
@@ -64,22 +79,17 @@ const register = async (req, res) => {
         email: user.email,
         role: user.role,
         isVerified: user.isVerified,
-        token,
       },
     });
   } catch (error) {
-    res.status(500).json({
-      success: false,
-      message: "Server error during registration",
-      error: error.message,
-    });
+    sendServerError(res, "Server error during registration", error);
   }
 };
 
 // Login user
 const login = async (req, res) => {
   try {
-    const { email, password, rememberMe } = req.body;
+    const { email, password } = req.body;
 
     const user = await User.findOne({ email }).select("+password");
 
@@ -91,11 +101,9 @@ const login = async (req, res) => {
     }
 
     if (user.isLocked) {
-      const unlockTime = new Date(user.lockUntil).toLocaleString();
-      return res.status(423).json({
+      return res.status(401).json({
         success: false,
-        message: `Account is temporarily locked. Please try again after ${unlockTime}`,
-        lockedUntil: user.lockUntil,
+        message: "Invalid email or password",
       });
     }
 
@@ -116,24 +124,21 @@ const login = async (req, res) => {
       if (updatedUser.isLocked) {
         const unlockTime = new Date(updatedUser.lockUntil).toLocaleString();
 
-        await sendEmail({
+        await sendEmailSafely({
           email: user.email,
           subject: "Account Locked - Unibro",
           html: accountLockedEmail(user.fullName, unlockTime),
         });
 
-        return res.status(423).json({
+        return res.status(401).json({
           success: false,
-          message: `Too many failed login attempts. Account locked until ${unlockTime}`,
-          lockedUntil: updatedUser.lockUntil,
+          message: "Invalid email or password",
         });
       }
 
-      const remainingAttempts = 5 - (updatedUser.loginAttempts || 0);
       return res.status(401).json({
         success: false,
         message: "Invalid email or password",
-        remainingAttempts: Math.max(0, remainingAttempts),
       });
     }
 
@@ -149,7 +154,7 @@ const login = async (req, res) => {
     const loginTime = new Date().toLocaleString();
     const ipAddress = req.ip || req.connection.remoteAddress;
 
-    await sendEmail({
+    const notificationSent = await sendEmailSafely({
       email: user.email,
       subject: "New Login to Your Account - Unibro",
       html: loginNotification(user.fullName, loginTime, ipAddress),
@@ -158,6 +163,7 @@ const login = async (req, res) => {
     res.status(200).json({
       success: true,
       message: "Login successful!",
+      notificationSent,
       token,
       user: {
         _id: user._id,
@@ -166,36 +172,22 @@ const login = async (req, res) => {
         role: user.role,
         isVerified: user.isVerified,
         avatar: user.avatar,
-        token,
       },
     });
   } catch (error) {
-    res.status(500).json({
-      success: false,
-      message: "Server error during login",
-      error: error.message,
-    });
+    sendServerError(res, "Server error during login", error);
   }
 };
 
 // Logout user
 const logout = async (req, res) => {
   try {
-    res.cookie("token", "", {
-      httpOnly: true,
-      expires: new Date(0),
-    });
-
     res.status(200).json({
       success: true,
       message: "Logged out successfully",
     });
   } catch (error) {
-    res.status(500).json({
-      success: false,
-      message: "Server error during logout",
-      error: error.message,
-    });
+    sendServerError(res, "Server error during logout", error);
   }
 };
 
@@ -224,24 +216,18 @@ const verifyEmail = async (req, res) => {
     user.lastVerificationResend = undefined;
     await user.save();
 
-    try {
-      await sendEmail({
-        email: user.email,
-        subject: "Welcome to Unibro! 🎉",
-        html: welcomeEmail(user.fullName),
-      });
-    } catch (emailError) {}
+    await sendEmailSafely({
+      email: user.email,
+      subject: "Welcome to Unibro! 🎉",
+      html: welcomeEmail(user.fullName),
+    });
 
     return res.status(200).json({
       success: true,
       message: "Email verified successfully!",
     });
   } catch (error) {
-    return res.status(500).json({
-      success: false,
-      message: "Server error during verification",
-      error: error.message,
-    });
+    return sendServerError(res, "Server error during verification", error);
   }
 };
 
@@ -308,11 +294,18 @@ const resendVerification = async (req, res) => {
 
     const verificationUrl = `${process.env.FRONTEND_URL}/verify-email/${verificationToken}`;
 
-    await sendEmail({
+    const emailSent = await sendEmailSafely({
       email: user.email,
       subject: "Verify Your Email - Unibro",
       html: verificationEmail(user.fullName, verificationUrl),
     });
+
+    if (!emailSent) {
+      return res.status(503).json({
+        success: false,
+        message: "Verification email service is temporarily unavailable",
+      });
+    }
 
     res.status(200).json({
       success: true,
@@ -320,11 +313,7 @@ const resendVerification = async (req, res) => {
       remainingAttempts: 5 - user.verificationResendCount,
     });
   } catch (error) {
-    res.status(500).json({
-      success: false,
-      message: "Error sending verification email",
-      error: error.message,
-    });
+    sendServerError(res, "Error sending verification email", error);
   }
 };
 
@@ -335,19 +324,15 @@ const forgotPassword = async (req, res) => {
 
     const user = await User.findOne({ email });
 
+    const genericMessage =
+      "If an eligible account exists, password reset instructions will be sent.";
+
     if (!user) {
-      return res.status(404).json({
-        success: false,
-        message: "No account found with that email address",
-      });
+      return res.status(202).json({ success: true, message: genericMessage });
     }
 
     if (user.authProvider === "google" && !user.password) {
-      return res.status(400).json({
-        success: false,
-        message:
-          "This account was created with Google. Please use Google Sign-In.",
-      });
+      return res.status(202).json({ success: true, message: genericMessage });
     }
 
     const resetToken = user.generatePasswordResetToken();
@@ -355,22 +340,22 @@ const forgotPassword = async (req, res) => {
 
     const resetUrl = `${process.env.FRONTEND_URL}/reset-password/${resetToken}`;
 
-    await sendEmail({
+    const emailSent = await sendEmailSafely({
       email: user.email,
       subject: "Password Reset Request - Unibro",
       html: passwordResetEmail(user.fullName, resetUrl),
     });
 
-    res.status(200).json({
-      success: true,
-      message: "Password reset email sent! Please check your inbox.",
-    });
+    if (!emailSent) {
+      return res.status(503).json({
+        success: false,
+        message: "Password reset email service is temporarily unavailable",
+      });
+    }
+
+    res.status(202).json({ success: true, message: genericMessage });
   } catch (error) {
-    res.status(500).json({
-      success: false,
-      message: "Error sending password reset email",
-      error: error.message,
-    });
+    sendServerError(res, "Error sending password reset email", error);
   }
 };
 
@@ -404,7 +389,7 @@ const resetPassword = async (req, res) => {
 
     await user.save();
 
-    await sendEmail({
+    const notificationSent = await sendEmailSafely({
       email: user.email,
       subject: "Password Changed Successfully - Unibro",
       html: passwordResetSuccessEmail(user.fullName),
@@ -414,13 +399,10 @@ const resetPassword = async (req, res) => {
       success: true,
       message:
         "Password reset successful! You can now login with your new password.",
+      notificationSent,
     });
   } catch (error) {
-    res.status(500).json({
-      success: false,
-      message: "Error resetting password",
-      error: error.message,
-    });
+    sendServerError(res, "Error resetting password", error);
   }
 };
 
@@ -443,11 +425,7 @@ const getMe = async (req, res) => {
       },
     });
   } catch (error) {
-    res.status(500).json({
-      success: false,
-      message: "Server error",
-      error: error.message,
-    });
+    sendServerError(res, "Server error", error);
   }
 };
 
@@ -460,33 +438,33 @@ const googleCallback = async (req, res) => {
 
     const token = generateSimpleToken(req.user._id);
 
-    req.user.lastLogin = Date.now();
     const isNewUser =
       !req.user.lastLogin ||
       Date.now() - new Date(req.user.createdAt).getTime() < 60000;
+    req.user.lastLogin = Date.now();
 
     await req.user.save();
 
-    try {
-      if (isNewUser) {
-        await sendEmail({
-          email: req.user.email,
-          subject: "Welcome to Unibro! 🎉",
-          html: welcomeEmail(req.user.fullName),
-        });
-      } else {
-        const loginTime = new Date().toLocaleString();
-        const ipAddress = req.ip || req.connection?.remoteAddress || "Unknown";
+    if (isNewUser) {
+      await sendEmailSafely({
+        email: req.user.email,
+        subject: "Welcome to Unibro! 🎉",
+        html: welcomeEmail(req.user.fullName),
+      });
+    } else {
+      const loginTime = new Date().toLocaleString();
+      const ipAddress = req.ip || req.connection?.remoteAddress || "Unknown";
 
-        await sendEmail({
-          email: req.user.email,
-          subject: "New Login to Your Account - Unibro",
-          html: loginNotification(req.user.fullName, loginTime, ipAddress),
-        });
-      }
-    } catch (emailError) {}
+      await sendEmailSafely({
+        email: req.user.email,
+        subject: "New Login to Your Account - Unibro",
+        html: loginNotification(req.user.fullName, loginTime, ipAddress),
+      });
+    }
 
-    const redirectUrl = `${process.env.FRONTEND_URL}/auth/success?token=${token}`;
+    const redirectUrl = `${process.env.FRONTEND_URL}/auth/success#token=${encodeURIComponent(
+      token
+    )}`;
     res.redirect(redirectUrl);
   } catch (error) {
     res.redirect(`${process.env.FRONTEND_URL}/auth/error`);

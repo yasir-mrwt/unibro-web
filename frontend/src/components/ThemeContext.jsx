@@ -1,5 +1,7 @@
 import React, { createContext, useContext, useState, useEffect } from "react";
 
+/* eslint-disable react-refresh/only-export-components -- context and hook are intentionally colocated */
+
 const ThemeContext = createContext();
 
 export const useTheme = () => {

@@ -1,0 +1,56 @@
+const BASE_REQUIRED_ENV = [
+  "FRONTEND_URL",
+  "MONGO_URI",
+  "JWT_SECRET",
+  "JWT_EXPIRE",
+];
+const PRODUCTION_REQUIRED_ENV = [
+  "SUPABASE_URL",
+  "SUPABASE_SERVICE_KEY",
+  "MAILJET_API_KEY",
+  "MAILJET_SECRET_KEY",
+  "MAILJET_SENDER_EMAIL",
+  "GOOGLE_CLIENT_ID",
+  "GOOGLE_CLIENT_SECRET",
+  "GOOGLE_CALLBACK_URL",
+];
+const validateEnvironment = () => {
+  const required =
+    process.env.NODE_ENV === "production"
+      ? [...BASE_REQUIRED_ENV, ...PRODUCTION_REQUIRED_ENV]
+      : BASE_REQUIRED_ENV;
+  const missing = required.filter((name) => !process.env[name]?.trim());
+  if (missing.length)
+    throw new Error(
+      `Missing required environment variables: ${missing.join(", ")}`,
+    );
+  const urlVariables = [
+    ["FRONTEND_URL", process.env.FRONTEND_URL],
+    ["SUPABASE_URL", process.env.SUPABASE_URL],
+    ["GOOGLE_CALLBACK_URL", process.env.GOOGLE_CALLBACK_URL],
+    ...String(process.env.FRONTEND_URLS || "")
+      .split(",")
+      .map((value, index) => [`FRONTEND_URLS[${index}]`, value.trim()])
+      .filter(([, value]) => value),
+  ];
+  for (const [name, value] of urlVariables) {
+    if (!value) continue;
+    try {
+      const parsed = new URL(value);
+      if (!["http:", "https:"].includes(parsed.protocol)) throw new Error();
+    } catch {
+      throw new Error(`${name} must be a valid HTTP(S) URL`);
+    }
+  }
+  if (
+    process.env.NODE_ENV === "production" &&
+    process.env.JWT_SECRET.length < 32
+  )
+    throw new Error("JWT_SECRET must be at least 32 characters in production");
+  if (
+    process.env.MAILJET_SENDER_EMAIL &&
+    !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(process.env.MAILJET_SENDER_EMAIL)
+  )
+    throw new Error("MAILJET_SENDER_EMAIL must be valid");
+};
+module.exports = { validateEnvironment };

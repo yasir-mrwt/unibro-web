@@ -1,213 +1,74 @@
-import React, { useEffect, useState } from "react";
+import React, { useEffect, useRef, useState } from "react";
+import { CheckCircle2, LoaderCircle, AlertCircle } from "lucide-react";
 import { useNavigate, useSearchParams } from "react-router-dom";
-import { CheckCircle, XCircle, Loader2 } from "lucide-react";
-import { useTheme } from "../components/ThemeContext";
+import { API_URL } from "../services/config";
 import { storeAuthData } from "../services/authService";
-
-const AuthSuccess = ({ onLoginSuccess }) => {
-  const [searchParams] = useSearchParams();
+export default function AuthSuccess({ onLoginSuccess }) {
+  const [params] = useSearchParams();
   const navigate = useNavigate();
-  const { darkMode } = useTheme();
-  const [status, setStatus] = useState("loading");
-  const [errorMessage, setErrorMessage] = useState("");
-
+  const once = useRef(false);
+  const [state, setState] = useState({
+    status: "loading",
+    message: "Securely completing your Google sign-in.",
+  });
   useEffect(() => {
-    const handleGoogleAuth = async () => {
+    if (once.current) return;
+    once.current = true;
+    (async () => {
       try {
-        const token = searchParams.get("token");
-
-        if (!token) {
-          setStatus("error");
-          setErrorMessage("No authentication token received");
-          setTimeout(() => navigate("/"), 3000);
-          return;
-        }
-
-        localStorage.setItem("token", token);
-
-        const response = await fetch(
-          import.meta.env.VITE_API_URL + "/api/auth/me",
-          {
-            method: "GET",
-            credentials: "include",
-            headers: {
-              Authorization: `Bearer ${token}`,
-              "Content-Type": "application/json",
-            },
-          }
-        );
-
+        const hash = new URLSearchParams(window.location.hash.slice(1));
+        const token = hash.get("token") || params.get("token");
+        window.history.replaceState({}, document.title, "/auth/success");
+        if (!token) throw new Error("No authentication token was received.");
+        const response = await fetch(`${API_URL}/api/auth/me`, {
+          headers: { Authorization: `Bearer ${token}` },
+        });
         const data = await response.json();
-
-        if (!response.ok) {
-          throw new Error(data.message || "Failed to fetch user data");
-        }
-
-        if (data.success && data.user) {
-          const userWithToken = {
-            ...data.user,
-            token: token,
-          };
-
-          storeAuthData(userWithToken);
-
-          if (onLoginSuccess) {
-            onLoginSuccess(userWithToken);
-          }
-
-          window.dispatchEvent(
-            new CustomEvent("userLoggedIn", {
-              detail: userWithToken,
-            })
-          );
-          window.dispatchEvent(new Event("storage"));
-
-          setStatus("success");
-
-          setTimeout(() => {
-            navigate("/", { replace: true });
-          }, 1500);
-        } else {
-          throw new Error("Invalid response format");
-        }
+        if (!response.ok || !data.user)
+          throw new Error(data.message || "Authentication failed.");
+        storeAuthData({ token, user: data.user });
+        onLoginSuccess?.(data.user);
+        setState({
+          status: "success",
+          message: "You’re signed in. Taking you to UniBro…",
+        });
+        setTimeout(() => navigate("/", { replace: true }), 900);
       } catch (error) {
-        console.error("Google auth error:", error);
-        setStatus("error");
-        setErrorMessage(error.message || "Authentication failed");
-
-        localStorage.removeItem("token");
-        localStorage.removeItem("user");
-
-        setTimeout(() => {
-          navigate("/", { replace: true });
-        }, 3000);
+        setState({ status: "error", message: error.message });
       }
-    };
-
-    handleGoogleAuth();
-  }, [searchParams, navigate, onLoginSuccess]);
-
+    })();
+  }, [params, navigate, onLoginSuccess]);
   return (
-    <div
-      className={`min-h-screen flex items-center justify-center ${
-        darkMode ? "bg-gray-950" : "bg-gray-50"
-      }`}
-    >
-      <div className="w-full max-w-md px-6 text-center">
-        {/* Loading State */}
-        {status === "loading" && (
-          <div className="space-y-8">
-            {/* Simple Clean Spinner */}
-            <div className="flex justify-center">
-              <Loader2
-                className={`w-12 h-12 animate-spin ${
-                  darkMode ? "text-blue-500" : "text-blue-600"
-                }`}
-              />
-            </div>
-
-            <div className="space-y-3">
-              <h1
-                className={`text-2xl font-semibold ${
-                  darkMode ? "text-white" : "text-gray-900"
-                }`}
-              >
-                Authenticating
-              </h1>
-              <p
-                className={`text-sm ${
-                  darkMode ? "text-gray-400" : "text-gray-600"
-                }`}
-              >
-                Please wait while we verify your credentials
-              </p>
-            </div>
+    <div className="page-narrow page">
+      <div className="card state">
+        <div>
+          <div className="state-visual">
+            {state.status === "loading" ? (
+              <LoaderCircle size={36} className="animate-spin" />
+            ) : state.status === "success" ? (
+              <CheckCircle2 size={36} />
+            ) : (
+              <AlertCircle size={36} />
+            )}
           </div>
-        )}
-
-        {/* Success State */}
-        {status === "success" && (
-          <div className="space-y-8">
-            {/* Clean Success Icon */}
-            <div className="flex justify-center">
-              <div
-                className={`w-16 h-16 rounded-full flex items-center justify-center ${
-                  darkMode ? "bg-green-500/10" : "bg-green-50"
-                }`}
-              >
-                <CheckCircle
-                  className={`w-10 h-10 ${
-                    darkMode ? "text-green-500" : "text-green-600"
-                  }`}
-                />
-              </div>
-            </div>
-
-            <div className="space-y-3">
-              <h1
-                className={`text-2xl font-semibold ${
-                  darkMode ? "text-white" : "text-gray-900"
-                }`}
-              >
-                Sign in successful
-              </h1>
-              <p
-                className={`text-sm ${
-                  darkMode ? "text-gray-400" : "text-gray-600"
-                }`}
-              >
-                Welcome back! Redirecting you now...
-              </p>
-            </div>
-          </div>
-        )}
-
-        {/* Error State */}
-        {status === "error" && (
-          <div className="space-y-8">
-            {/* Clean Error Icon */}
-            <div className="flex justify-center">
-              <div
-                className={`w-16 h-16 rounded-full flex items-center justify-center ${
-                  darkMode ? "bg-red-500/10" : "bg-red-50"
-                }`}
-              >
-                <XCircle
-                  className={`w-10 h-10 ${
-                    darkMode ? "text-red-500" : "text-red-600"
-                  }`}
-                />
-              </div>
-            </div>
-
-            <div className="space-y-3">
-              <h1
-                className={`text-2xl font-semibold ${
-                  darkMode ? "text-white" : "text-gray-900"
-                }`}
-              >
-                Authentication failed
-              </h1>
-              <p
-                className={`text-sm ${
-                  darkMode ? "text-gray-400" : "text-gray-600"
-                }`}
-              >
-                {errorMessage || "Unable to complete sign in"}
-              </p>
-              <p
-                className={`text-xs ${
-                  darkMode ? "text-gray-500" : "text-gray-500"
-                }`}
-              >
-                Returning to home page...
-              </p>
-            </div>
-          </div>
-        )}
+          <h1>
+            {state.status === "loading"
+              ? "Completing sign-in"
+              : state.status === "success"
+                ? "Signed in"
+                : "Sign-in failed"}
+          </h1>
+          <p>{state.message}</p>
+          {state.status === "error" && (
+            <button
+              className="btn btn-primary"
+              onClick={() => navigate("/login")}
+            >
+              Try again
+            </button>
+          )}
+        </div>
       </div>
     </div>
   );
-};
-
-export default AuthSuccess;
+}

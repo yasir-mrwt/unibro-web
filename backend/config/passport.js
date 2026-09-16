@@ -6,17 +6,24 @@ const User = require("../models/user");
  * Google OAuth Strategy Configuration
  * Handles user authentication via Google OAuth 2.0
  */
-passport.use(
-  new GoogleStrategy(
-    {
-      clientID: process.env.GOOGLE_CLIENT_ID,
-      clientSecret: process.env.GOOGLE_CLIENT_SECRET,
-      callbackURL: process.env.GOOGLE_CALLBACK_URL,
-      proxy: true, // Required for proxy environments (Heroku, etc.)
-      passReqToCallback: false,
-    },
-    async (accessToken, refreshToken, profile, done) => {
-      try {
+const googleAuthEnabled = Boolean(
+  process.env.GOOGLE_CLIENT_ID &&
+    process.env.GOOGLE_CLIENT_SECRET &&
+    process.env.GOOGLE_CALLBACK_URL
+);
+
+if (googleAuthEnabled) {
+  passport.use(
+    new GoogleStrategy(
+      {
+        clientID: process.env.GOOGLE_CLIENT_ID,
+        clientSecret: process.env.GOOGLE_CLIENT_SECRET,
+        callbackURL: process.env.GOOGLE_CALLBACK_URL,
+        proxy: true,
+        passReqToCallback: false,
+      },
+      async (_accessToken, _refreshToken, profile, done) => {
+        try {
         // Validate required email data from Google profile
         if (!profile.emails || profile.emails.length === 0) {
           return done(new Error("No email found in Google profile"), null);
@@ -33,7 +40,7 @@ passport.use(
          */
         let user = await User.findOne({
           $or: [{ email: email }, { googleId: googleId }],
-        });
+        }).select("+password");
 
         if (user) {
           // Update existing user with Google OAuth data
@@ -89,34 +96,15 @@ passport.use(
         });
 
         return done(null, user);
-      } catch (error) {
-        console.error("Google OAuth Error:", error);
-        return done(error, null);
+        } catch (error) {
+          if (process.env.NODE_ENV === "development") {
+            console.error(`Google OAuth failed: ${error.message}`);
+          }
+          return done(error, null);
+        }
       }
-    }
-  )
-);
+    )
+  );
+}
 
-/**
- * Serialize user ID to session
- * Stores minimal user data in session for performance
- */
-passport.serializeUser((user, done) => {
-  done(null, user._id); // Use MongoDB _id for session storage
-});
-
-/**
- * Deserialize user from session ID
- * Retrieves full user data from database when needed
- */
-passport.deserializeUser(async (id, done) => {
-  try {
-    const user = await User.findById(id).select("-password"); // Exclude password for security
-    done(null, user);
-  } catch (error) {
-    console.error("Deserialize error:", error);
-    done(error, null);
-  }
-});
-
-module.exports = passport;
+module.exports = { passport, googleAuthEnabled };

@@ -9,15 +9,47 @@ const {
   getDepartments,
 } = require("../controllers/staffController");
 const { protect, authorize } = require("../middleware/authMiddleware");
+const { staffImageUpload, handleUploadError } = require("../middleware/upload");
+const {
+  staffValidation,
+  staffQueryValidation,
+  mongoIdValidation,
+  validate,
+} = require("../middleware/validation");
 
 // Public routes
-router.get("/", getAllStaff);
+router.get("/", staffQueryValidation, validate, getAllStaff);
 router.get("/departments", getDepartments);
-router.get("/:id", getStaffById);
+router.get("/:id", mongoIdValidation(), validate, getStaffById);
 
 // Admin only routes
-router.post("/", protect, authorize("admin"), createStaff);
-router.put("/:id", protect, authorize("admin"), updateStaff);
-router.delete("/:id", protect, authorize("admin"), deleteStaff);
+router.post(
+  "/",
+  protect,
+  authorize("admin"),
+  staffImageUpload.single("image"),
+  handleUploadError,
+  staffValidation,
+  validate,
+  createStaff
+);
+router.put(
+  "/:id",
+  protect,
+  authorize("admin"),
+  staffImageUpload.single("image"),
+  handleUploadError,
+  staffValidation,
+  validate,
+  updateStaff
+);
+router.delete(
+  "/:id",
+  protect,
+  authorize("admin"),
+  mongoIdValidation(),
+  validate,
+  deleteStaff
+);
 
 module.exports = router;

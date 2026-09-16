@@ -1,414 +1,192 @@
-import React, { useState, useEffect } from "react";
-import { useNavigate, useLocation } from "react-router-dom";
+import React, { useCallback, useEffect, useState } from "react";
+import { useLocation, useNavigate } from "react-router-dom";
 import {
-  ArrowLeft,
-  BookOpen,
-  FileText,
-  ClipboardList,
-  Presentation,
-  FolderOpen,
   BookMarked,
-  ChevronRight,
-  Sparkles,
-  Home,
+  BookOpen,
+  Building2,
+  ClipboardList,
+  FileText,
+  FolderOpen,
+  MessageCircle,
+  Presentation,
+  RefreshCw,
+  UploadCloud,
 } from "lucide-react";
-import { useTheme } from "../ThemeContext";
-import ChatPanel from "../chat/ChatPanel";
-import ChatIcon from "../chat/ChatIcon";
-import ChatModal from "../chat/ChatModal";
+import { API_URL } from "../../services/config";
+import { ErrorState, LoadingState } from "../ui/States";
 
-// Premium Resource Card Component
-const ResourceCard = ({ icon, title, count, color, darkMode, onClick }) => {
-  return (
-    <div
-      onClick={onClick}
-      className={`group relative overflow-hidden rounded-2xl transition-all duration-300 cursor-pointer ${
-        darkMode
-          ? "bg-gradient-to-br from-gray-800 to-gray-900 hover:from-gray-750 hover:to-gray-850"
-          : "bg-white hover:shadow-2xl"
-      } border ${
-        darkMode ? "border-gray-700/50" : "border-gray-200"
-      } hover:scale-[1.02]`}
-    >
-      {/* Animated gradient background on hover */}
-      <div
-        className={`absolute inset-0 bg-gradient-to-br ${color} opacity-0 group-hover:opacity-5 transition-opacity duration-300`}
-      ></div>
-
-      <div className="relative p-6">
-        <div className="flex items-start justify-between mb-4">
-          <div
-            className={`p-3 rounded-xl bg-gradient-to-br ${color} shadow-lg group-hover:shadow-xl transition-shadow`}
-          >
-            {React.cloneElement(icon, { className: "w-6 h-6 text-white" })}
-          </div>
-          <ChevronRight
-            className={`w-5 h-5 ${
-              darkMode ? "text-gray-600" : "text-gray-400"
-            } group-hover:translate-x-1 transition-transform`}
-          />
-        </div>
-
-        <h3
-          className={`text-lg font-semibold mb-1 ${
-            darkMode ? "text-white" : "text-gray-900"
-          }`}
-        >
-          {title}
-        </h3>
-        <div className="flex items-baseline gap-2">
-          <span
-            className={`text-3xl font-bold bg-gradient-to-br ${color} bg-clip-text text-transparent`}
-          >
-            {count}
-          </span>
-          <span
-            className={`text-sm ${
-              darkMode ? "text-gray-400" : "text-gray-600"
-            }`}
-          >
-            items
-          </span>
-        </div>
-      </div>
-
-      {/* Bottom accent line */}
-      <div
-        className={`h-1 bg-gradient-to-r ${color} opacity-0 group-hover:opacity-100 transition-opacity`}
-      ></div>
-    </div>
-  );
+const types = [
+  ["Assignments", ClipboardList],
+  ["Quizzes", FileText],
+  ["Projects", FolderOpen],
+  ["Presentations", Presentation],
+  ["Notes", BookOpen],
+  ["Past Papers", BookMarked],
+];
+const storedContext = () => {
+  try {
+    return JSON.parse(localStorage.getItem("dashboardData"));
+  } catch {
+    return null;
+  }
 };
 
-// Dashboard Component
-const Dashboard = () => {
-  const navigate = useNavigate();
+export default function Dashboard() {
   const location = useLocation();
-  const { darkMode } = useTheme();
-
-  const [dashboardData, setDashboardData] = useState({
-    department: null,
-    semester: null,
-  });
-  const [resourceCounts, setResourceCounts] = useState({});
-  const [isChatOpen, setIsChatOpen] = useState(false);
-  const [loading, setLoading] = useState(true);
-
+  const navigate = useNavigate();
+  const context =
+    location.state?.department && location.state?.semester
+      ? location.state
+      : storedContext();
+  const [state, setState] = useState({ loading: true, error: "", counts: {} });
   useEffect(() => {
-    const savedData = localStorage.getItem("dashboardData");
-    if (savedData) {
-      setDashboardData(JSON.parse(savedData));
-    }
-  }, []);
-
-  useEffect(() => {
-    const { department, semester } = location.state || {};
-    if (department && semester) {
-      const newData = { department, semester };
-      setDashboardData(newData);
-      localStorage.setItem("dashboardData", JSON.stringify(newData));
-    }
+    if (location.state?.department && location.state?.semester)
+      localStorage.setItem("dashboardData", JSON.stringify(location.state));
   }, [location.state]);
-
-  // Fetch real resource counts from API
+  const load = useCallback(async () => {
+    if (!context) {
+      setState({ loading: false, error: "", counts: {} });
+      return;
+    }
+    setState((current) => ({ ...current, loading: true, error: "" }));
+    try {
+      const department = context.department?.name || context.department;
+      const response = await fetch(
+        `${API_URL}/api/resources/counts?department=${encodeURIComponent(department)}&semester=${encodeURIComponent(context.semester)}`,
+      );
+      const data = await response.json();
+      if (!response.ok)
+        throw new Error(data.message || "Unable to load resource counts");
+      setState({ loading: false, error: "", counts: data.counts || {} });
+    } catch (error) {
+      setState({ loading: false, error: error.message, counts: {} });
+    }
+  }, [context?.department, context?.semester]); // eslint-disable-line react-hooks/exhaustive-deps
   useEffect(() => {
-    const fetchResourceCounts = async () => {
-      if (!dashboardData.department || !dashboardData.semester) {
-        setLoading(false);
-        return;
-      }
-
-      try {
-        setLoading(true);
-        const API_URL =
-          import.meta.env.VITE_API_URL ||
-          "https://unibro-production.up.railway.app";
-
-        const response = await fetch(
-          `${API_URL}/api/resources/counts?department=${encodeURIComponent(
-            dashboardData.department.name
-          )}&semester=${dashboardData.semester}`
-        );
-
-        if (response.ok) {
-          const data = await response.json();
-          setResourceCounts(data.counts || {});
-        } else {
-          console.error("Failed to fetch resource counts");
-          // Set default counts if API fails
-          setResourceCounts({});
-        }
-      } catch (error) {
-        console.error("Error fetching resource counts:", error);
-        setResourceCounts({});
-      } finally {
-        setLoading(false);
-      }
-    };
-
-    fetchResourceCounts();
-  }, [dashboardData.department, dashboardData.semester]);
-
-  const handleBackToHome = () => {
-    navigate("/");
-  };
-
-  const handleStartOver = () => {
-    localStorage.removeItem("dashboardData");
-    navigate("/select-department");
-  };
-
-  const handleResourceClick = (resourceType) => {
-    navigate("/resource-details", {
-      state: {
-        resourceType,
-        department: dashboardData.department,
-        semester: dashboardData.semester,
-      },
-    });
-  };
-
-  const handleOpenChat = () => {
-    setIsChatOpen(true);
-  };
-
-  const handleCloseChat = () => {
-    setIsChatOpen(false);
-  };
-
-  const { department, semester } = dashboardData;
-
-  // Resource types with real counts from API
-  const resources = [
-    {
-      icon: <ClipboardList />,
-      title: "Assignments",
-      count: resourceCounts.Assignments || 0,
-      color: "from-blue-500 to-cyan-500",
-    },
-    {
-      icon: <FileText />,
-      title: "Quizzes",
-      count: resourceCounts.Quizzes || 0,
-      color: "from-purple-500 to-pink-500",
-    },
-    {
-      icon: <Presentation />,
-      title: "Presentations",
-      count: resourceCounts.Presentations || 0,
-      color: "from-orange-500 to-red-500",
-    },
-    {
-      icon: <FolderOpen />,
-      title: "Projects",
-      count: resourceCounts.Projects || 0,
-      color: "from-green-500 to-emerald-500",
-    },
-    {
-      icon: <BookOpen />,
-      title: "Notes",
-      count: resourceCounts.Notes || 0,
-      color: "from-indigo-500 to-purple-500",
-    },
-    {
-      icon: <BookMarked />,
-      title: "Past Papers",
-      count: resourceCounts["Past Papers"] || 0,
-      color: "from-pink-500 to-rose-500",
-    },
-  ];
-
-  // Calculate total resources
-  const totalResources = resources.reduce(
-    (acc, resource) => acc + resource.count,
-    0
-  );
-
-  return (
-    <div
-      className={`min-h-screen relative ${
-        darkMode ? "bg-gray-950" : "bg-gray-50"
-      }`}
-    >
-      {/* Animated Background Elements */}
-      <div className="absolute inset-0 overflow-hidden pointer-events-none">
-        <div
-          className={`absolute top-20 right-20 w-72 h-72 rounded-full blur-3xl opacity-20 ${
-            darkMode ? "bg-blue-600" : "bg-blue-400"
-          } animate-pulse`}
-        ></div>
-        <div
-          className={`absolute bottom-20 left-20 w-72 h-72 rounded-full blur-3xl opacity-20 ${
-            darkMode ? "bg-purple-600" : "bg-purple-400"
-          } animate-pulse`}
-          style={{ animationDelay: "1s" }}
-        ></div>
-      </div>
-
-      <div className="relative max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 pt-20 sm:pt-24 pb-16 sm:pb-20">
-        {/* Premium Header */}
-        <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-4 mb-8 sm:mb-10">
-          <button
-            onClick={handleBackToHome}
-            className={`group flex items-center gap-2 px-4 py-2.5 rounded-xl font-medium transition-all ${
-              darkMode
-                ? "text-gray-300 hover:text-white hover:bg-gray-800 border border-gray-800"
-                : "text-gray-700 hover:text-gray-900 hover:bg-white border border-gray-200 shadow-sm hover:shadow"
-            }`}
-          >
-            <Home className="w-4 h-4 group-hover:-translate-x-1 transition-transform" />
-            <span>Back to Home</span>
-          </button>
-
-          <button
-            onClick={handleStartOver}
-            className={`px-4 py-2.5 rounded-xl font-medium transition-all ${
-              darkMode
-                ? "text-gray-300 hover:text-white hover:bg-gray-800 border border-gray-700"
-                : "text-gray-700 hover:text-gray-900 hover:bg-white border border-gray-200 shadow-sm hover:shadow"
-            }`}
-          >
-            Change Department
-          </button>
-        </div>
-
-        {department && semester ? (
-          <>
-            {/* Hero Section with Gradient */}
-            <div className="mb-8 sm:mb-12">
-              <div className="flex flex-col sm:flex-row sm:items-center gap-3 sm:gap-4 mb-3">
-                <h1
-                  className={`text-3xl sm:text-4xl lg:text-5xl font-black ${
-                    darkMode ? "text-white" : "text-gray-900"
-                  }`}
-                >
-                  {department.name}
-                </h1>
-                <div className="flex items-center gap-2">
-                  <span className="inline-flex items-center gap-1.5 px-4 py-1.5 bg-gradient-to-r from-blue-600 to-purple-600 text-white rounded-full text-sm font-semibold shadow-lg">
-                    <Sparkles className="w-4 h-4" />
-                    Semester {semester}
-                  </span>
-                </div>
-              </div>
-              <p
-                className={`text-base sm:text-lg ${
-                  darkMode ? "text-gray-400" : "text-gray-600"
-                }`}
-              >
-                {loading
-                  ? "Loading resources..."
-                  : `Explore ${totalResources} available resources for your semester`}
-              </p>
-            </div>
-
-            {/* Main Content */}
-            <div className="grid lg:grid-cols-3 gap-6 lg:gap-8">
-              {/* Resources Section */}
-              <div className="lg:col-span-2">
-                <div className="flex items-center justify-between mb-6">
-                  <h2
-                    className={`text-xl sm:text-2xl font-bold ${
-                      darkMode ? "text-white" : "text-gray-900"
-                    }`}
-                  >
-                    Learning Resources
-                  </h2>
-                  <span
-                    className={`text-sm px-3 py-1.5 rounded-full ${
-                      darkMode
-                        ? "bg-gray-800 text-gray-400"
-                        : "bg-gray-100 text-gray-600"
-                    }`}
-                  >
-                    {loading ? "..." : `${totalResources} total`}
-                  </span>
-                </div>
-
-                <div className="grid sm:grid-cols-2 gap-4 sm:gap-5">
-                  {resources.map((resource, index) => (
-                    <ResourceCard
-                      key={index}
-                      icon={resource.icon}
-                      title={resource.title}
-                      count={loading ? "..." : resource.count}
-                      color={resource.color}
-                      darkMode={darkMode}
-                      onClick={() => handleResourceClick(resource.title)}
-                    />
-                  ))}
-                </div>
-              </div>
-
-              {/* Chat Panel - Desktop */}
-              <div className="lg:col-span-1 hidden lg:block">
-                <div className="sticky top-24">
-                  <ChatPanel
-                    darkMode={darkMode}
-                    department={department}
-                    semester={semester}
-                  />
-                </div>
-              </div>
-            </div>
-          </>
-        ) : (
-          <div
-            className={`flex flex-col items-center justify-center py-20 sm:py-32 rounded-3xl ${
-              darkMode
-                ? "bg-gray-800/30 border border-gray-700/50"
-                : "bg-white border border-gray-200 shadow-xl"
-            }`}
-          >
-            <div className="w-20 h-20 rounded-2xl bg-gradient-to-br from-blue-600 to-purple-600 flex items-center justify-center mb-6 shadow-2xl">
-              <BookOpen className="w-10 h-10 text-white" />
-            </div>
-            <h2
-              className={`text-2xl sm:text-3xl font-bold mb-3 ${
-                darkMode ? "text-white" : "text-gray-900"
-              }`}
-            >
-              No Department Selected
-            </h2>
-            <p
-              className={`text-base sm:text-lg mb-8 text-center max-w-md ${
-                darkMode ? "text-gray-400" : "text-gray-600"
-              }`}
-            >
-              Choose your department and semester to access your personalized
-              learning dashboard
-            </p>
+    load();
+  }, [load]);
+  if (!context)
+    return (
+      <div className="page-narrow page">
+        <div className="state card">
+          <div>
+            <Building2 className="muted" size={36} />
+            <h1>Set up your workspace</h1>
+            <p>Choose a department and semester to open your dashboard.</p>
             <button
-              onClick={handleStartOver}
-              className="group px-8 py-4 bg-gradient-to-r from-blue-600 to-purple-600 text-white rounded-xl font-semibold shadow-xl hover:shadow-2xl hover:scale-105 transition-all flex items-center gap-2"
+              className="btn btn-primary"
+              onClick={() => navigate("/select-department")}
             >
-              Get Started
-              <ChevronRight className="w-5 h-5 group-hover:translate-x-1 transition-transform" />
+              Get started
             </button>
           </div>
-        )}
+        </div>
       </div>
-
-      {/* Mobile Chat */}
-      {department && semester && (
-        <>
-          <ChatIcon
-            onClick={handleOpenChat}
-            department={department}
-            semester={semester}
-            darkMode={darkMode}
-          />
-          <ChatModal
-            isOpen={isChatOpen}
-            onClose={handleCloseChat}
-            department={department}
-            semester={semester}
-            darkMode={darkMode}
-          />
-        </>
-      )}
+    );
+  const departmentName = context.department?.name || context.department;
+  const open = (resourceType) =>
+    navigate("/resource-details", { state: { ...context, resourceType } });
+  return (
+    <div className="container page stack">
+      <section className="workspace-head">
+        <div>
+          <span className="eyebrow">Student workspace</span>
+          <h1 className="page-title">Ready for semester {context.semester}?</h1>
+          <div className="context-pills">
+            <span className="badge badge-brand">{departmentName}</span>
+            <span className="badge">Semester {context.semester}</span>
+          </div>
+        </div>
+        <div className="cluster">
+          <button
+            className="btn btn-secondary"
+            onClick={() => navigate("/select-department")}
+          >
+            <RefreshCw size={17} /> Change
+          </button>
+          <button
+            className="btn btn-primary"
+            onClick={() => navigate("/upload-modal", { state: context })}
+          >
+            <UploadCloud size={17} /> Upload
+          </button>
+        </div>
+      </section>
+      <section>
+        <div className="page-header">
+          <div>
+            <h2 className="section-title">Browse your library</h2>
+            <p className="page-copy">
+              Open a category to search, preview, and download approved
+              resources.
+            </p>
+          </div>
+        </div>
+        {state.loading ? (
+          <LoadingState rows={3} />
+        ) : state.error ? (
+          <ErrorState message={state.error} onRetry={load} />
+        ) : (
+          <div className="resource-type-grid">
+            {types.map(([name, Icon]) => (
+              <button
+                className="card type-card card-interactive"
+                key={name}
+                onClick={() => open(name)}
+              >
+                <span className="icon-box">
+                  {React.createElement(Icon, { size: 20 })}
+                </span>
+                <span style={{ textAlign: "left" }}>
+                  <h3>{name}</h3>
+                  <span className="muted small">Study resources</span>
+                </span>
+                <span className="type-count">{state.counts[name] || 0}</span>
+              </button>
+            ))}
+          </div>
+        )}
+      </section>
+      <section className="feature-grid">
+        <article className="card card-pad">
+          <span className="icon-box accent">
+            <MessageCircle size={20} />
+          </span>
+          <h2 className="section-title" style={{ marginTop: 15 }}>
+            Semester community
+          </h2>
+          <p className="page-copy">
+            Join the verified chat for {departmentName}, semester{" "}
+            {context.semester}.
+          </p>
+          <button
+            className="btn btn-secondary"
+            style={{ marginTop: 15 }}
+            onClick={() => navigate("/community", { state: context })}
+          >
+            Open community
+          </button>
+        </article>
+        <article className="card card-pad" style={{ gridColumn: "span 2" }}>
+          <span className="icon-box">
+            <UploadCloud size={20} />
+          </span>
+          <h2 className="section-title" style={{ marginTop: 15 }}>
+            Keep the library useful
+          </h2>
+          <p className="page-copy">
+            Share notes, assignments, projects, presentations, quizzes, or past
+            papers. You can follow moderation progress from My uploads.
+          </p>
+          <button
+            className="btn btn-ghost"
+            style={{ marginTop: 10 }}
+            onClick={() => navigate("/my-posts")}
+          >
+            Manage my uploads
+          </button>
+        </article>
+      </section>
     </div>
   );
-};
-
-export default Dashboard;
+}

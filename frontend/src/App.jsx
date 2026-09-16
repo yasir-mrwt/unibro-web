@@ -1,108 +1,108 @@
-import React, { useState } from "react";
-import { BrowserRouter as Router, Routes, Route } from "react-router-dom";
+import React, { lazy, Suspense } from "react";
+import { BrowserRouter, Navigate, Route, Routes } from "react-router-dom";
 import { ThemeProvider } from "./components/ThemeContext";
+import { ToastProvider } from "./components/ui/ToastContext";
+import { LoadingState } from "./components/ui/States";
 import Navbar from "./components/navbar";
-import HeroSection from "./components/heroSection";
-import CTASection from "./components/ctaSection";
-import FeaturesSection from "./components/features";
-import DepartmentSelection from "./components/academics/departmentSelection";
-import SemesterSelection from "./components/academics/semesterSelection";
-import Dashboard from "./components/academics/dashboard";
-import ResourceDetails from "./components/academics/resourceDetails";
-import UploadModal from "./components/academics/uploadModel";
-import AboutPage from "./components/navbarLinks/aboutPage";
-import StaffDirectory from "./components/navbarLinks/StaffDirectory";
-import CommunityGuidelines from "./components/navbarLinks/communityPage";
-import AnnouncementBanner from "./components/AnnouncementBanner";
 
-// Import authentication pages
-import VerifyEmail from "./pages/VerifyEmail";
-import ResetPassword from "./pages/ResetPassword";
-import ProfileSettings from "./pages/ProfileSettings";
-import MyPosts from "./pages/MyPosts";
-import AdminDashboard from "./pages/AdminDashboard";
+const Home = lazy(() => import("./pages/Home"));
+const DepartmentSelection = lazy(
+  () => import("./components/academics/departmentSelection"),
+);
+const SemesterSelection = lazy(
+  () => import("./components/academics/semesterSelection"),
+);
+const Dashboard = lazy(() => import("./components/academics/dashboard"));
+const ResourceDetails = lazy(
+  () => import("./components/academics/resourceDetails"),
+);
+const UploadModal = lazy(() => import("./components/academics/uploadModel"));
+const AboutPage = lazy(() => import("./components/navbarLinks/aboutPage"));
+const StaffDirectory = lazy(
+  () => import("./components/navbarLinks/StaffDirectory"),
+);
+const Community = lazy(() => import("./components/navbarLinks/communityPage"));
+const VerifyEmail = lazy(() => import("./pages/VerifyEmail"));
+const ResetPassword = lazy(() => import("./pages/ResetPassword"));
+const ProfileSettings = lazy(() => import("./pages/ProfileSettings"));
+const MyPosts = lazy(() => import("./pages/MyPosts"));
+const AdminDashboard = lazy(() => import("./pages/AdminDashboard"));
+const AuthSuccess = lazy(() => import("./pages/AuthSuccess"));
+const AuthError = lazy(() => import("./pages/AuthError"));
+const NotFound = lazy(() => import("./pages/NotFound"));
 
-// Import Google OAuth callback pages
-import AuthSuccess from "./pages/AuthSuccess";
-import AuthError from "./pages/AuthError";
-
-const LandingPage = () => {
-  return (
-    <>
-      <HeroSection />
-      <FeaturesSection />
-      <CTASection />
-    </>
-  );
-};
-
-const App = () => {
-  // ✅ State to track if announcement banner is visible
-  const [isBannerVisible, setIsBannerVisible] = useState(true);
-
-  // Handler to update navbar when user logs in via OAuth
+export default function App() {
   const handleOAuthLoginSuccess = (user) => {
-    window.dispatchEvent(
-      new CustomEvent("userLoggedIn", {
-        detail: user,
-      })
-    );
+    window.dispatchEvent(new CustomEvent("userLoggedIn", { detail: user }));
     window.dispatchEvent(new Event("storage"));
   };
-
   return (
     <ThemeProvider>
-      <Router>
-        <div className="min-h-screen bg-white text-gray-900 dark:bg-gray-900 dark:text-white transition-colors duration-300">
-          {/* ✅ Announcement Banner */}
-          <AnnouncementBanner onVisibilityChange={setIsBannerVisible} />
-
-          {/* ✅ Conditionally apply padding based on banner visibility */}
-          <div
-            className={`transition-all duration-300 ${
-              isBannerVisible ? "pt-10 sm:pt-12" : "pt-0"
-            }`}
-          >
+      <ToastProvider>
+        <BrowserRouter>
+          <div className="app-root">
             <Navbar />
+            <main className="app-main">
+              <Suspense
+                fallback={
+                  <div className="container page">
+                    <LoadingState label="Loading page" />
+                  </div>
+                }
+              >
+                <Routes>
+                  <Route path="/" element={<Home />} />
+                  <Route
+                    path="/select-department"
+                    element={<DepartmentSelection />}
+                  />
+                  <Route
+                    path="/select-semester"
+                    element={<SemesterSelection />}
+                  />
+                  <Route path="/dashboard" element={<Dashboard />} />
+                  <Route
+                    path="/resource-details"
+                    element={<ResourceDetails />}
+                  />
+                  <Route path="/upload-modal" element={<UploadModal />} />
+                  <Route path="/community" element={<Community />} />
+                  <Route path="/staff" element={<StaffDirectory />} />
+                  <Route path="/about" element={<AboutPage />} />
+                  <Route
+                    path="/verify-email/:token"
+                    element={<VerifyEmail />}
+                  />
+                  <Route
+                    path="/reset-password/:token"
+                    element={<ResetPassword />}
+                  />
+                  <Route
+                    path="/profile-settings"
+                    element={<ProfileSettings />}
+                  />
+                  <Route
+                    path="/auth/success"
+                    element={
+                      <AuthSuccess onLoginSuccess={handleOAuthLoginSuccess} />
+                    }
+                  />
+                  <Route path="/auth/error" element={<AuthError />} />
+                  <Route
+                    path="/login"
+                    element={
+                      <Navigate to="/" replace state={{ showLogin: true }} />
+                    }
+                  />
+                  <Route path="/my-posts" element={<MyPosts />} />
+                  <Route path="/admin/dashboard" element={<AdminDashboard />} />
+                  <Route path="*" element={<NotFound />} />
+                </Routes>
+              </Suspense>
+            </main>
           </div>
-
-          <Routes>
-            {/* Landing & Academic Routes */}
-            <Route path="/" element={<LandingPage />} />
-            <Route
-              path="/select-department"
-              element={<DepartmentSelection />}
-            />
-            <Route path="/select-semester" element={<SemesterSelection />} />
-            <Route path="/dashboard" element={<Dashboard />} />
-            <Route path="/resource-details" element={<ResourceDetails />} />
-            <Route path="/upload-modal" element={<UploadModal />} />
-
-            {/* Navbar Links */}
-            <Route path="/community" element={<CommunityGuidelines />} />
-            <Route path="/staff" element={<StaffDirectory />} />
-            <Route path="/about" element={<AboutPage />} />
-
-            {/* Authentication Routes */}
-            <Route path="/verify-email/:token" element={<VerifyEmail />} />
-            <Route path="/reset-password/:token" element={<ResetPassword />} />
-            <Route path="/profile-settings" element={<ProfileSettings />} />
-
-            {/* Google OAuth Callback Routes */}
-            <Route
-              path="/auth/success"
-              element={<AuthSuccess onLoginSuccess={handleOAuthLoginSuccess} />}
-            />
-            <Route path="/auth/error" element={<AuthError />} />
-
-            {/* Resource Management Routes */}
-            <Route path="/my-posts" element={<MyPosts />} />
-            <Route path="/admin/dashboard" element={<AdminDashboard />} />
-          </Routes>
-        </div>
-      </Router>
+        </BrowserRouter>
+      </ToastProvider>
     </ThemeProvider>
   );
-};
-
-export default App;
+}

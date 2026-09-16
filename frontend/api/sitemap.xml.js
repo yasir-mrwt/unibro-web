@@ -1,20 +1,16 @@
 export default function handler(req, res) {
-  const baseUrl = "https://unibro-production.vercel.app";
+  const productionHost = process.env.VERCEL_PROJECT_PRODUCTION_URL;
+  const baseUrl = productionHost
+    ? `https://${productionHost}`
+    : "http://localhost:5173";
   const today = new Date().toISOString().split("T")[0];
 
   const urls = [
     { loc: "/", priority: "1.0", changefreq: "weekly" },
-    { loc: "/submit", priority: "0.8", changefreq: "monthly" },
     { loc: "/community", priority: "0.8", changefreq: "monthly" },
     { loc: "/about", priority: "0.7", changefreq: "monthly" },
-    { loc: "/resources", priority: "0.9", changefreq: "weekly" },
     { loc: "/select-department", priority: "0.8", changefreq: "monthly" },
-    { loc: "/select-semester", priority: "0.8", changefreq: "monthly" },
     { loc: "/staff", priority: "0.7", changefreq: "monthly" },
-    { loc: "/chat", priority: "0.6", changefreq: "daily" },
-    { loc: "/login", priority: "0.5", changefreq: "monthly" },
-    { loc: "/register", priority: "0.5", changefreq: "monthly" },
-    { loc: "/profile", priority: "0.5", changefreq: "monthly" },
   ];
 
   const urlsXml = urls
@@ -24,7 +20,7 @@ export default function handler(req, res) {
     <lastmod>${today}</lastmod>
     <changefreq>${url.changefreq}</changefreq>
     <priority>${url.priority}</priority>
-  </url>`
+  </url>`,
     )
     .join("\n");
 

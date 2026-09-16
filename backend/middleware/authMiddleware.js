@@ -5,14 +5,9 @@ const User = require("../models/user");
 const protect = async (req, res, next) => {
   let token;
 
-  // Check if token exists in cookies
-  if (req.cookies.token) {
-    token = req.cookies.token;
-  }
-  // Also check Authorization header (for mobile apps or API clients)
-  else if (
+  if (
     req.headers.authorization &&
-    req.headers.authorization.startsWith("Bearer")
+    req.headers.authorization.startsWith("Bearer ")
   ) {
     token = req.headers.authorization.split(" ")[1];
   }
@@ -44,7 +39,6 @@ const protect = async (req, res, next) => {
     return res.status(401).json({
       success: false,
       message: "Not authorized, token failed",
-      error: error.message,
     });
   }
 };

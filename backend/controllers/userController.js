@@ -1,11 +1,29 @@
 const User = require("../models/user");
 const { sendEmail } = require("../config/email");
-const { passwordResetSuccessEmail } = require("../utils/emailTemplates");
+const {
+  passwordResetSuccessEmail,
+  verificationEmail,
+} = require("../utils/emailTemplates");
+const { sendServerError } = require("../utils/httpError");
+
+const sendEmailSafely = async (options) => {
+  try {
+    await sendEmail(options);
+    return true;
+  } catch (error) {
+    if (process.env.NODE_ENV === "development") {
+      console.error(`Email delivery failed: ${error.message}`);
+    }
+    return false;
+  }
+};
 
 // Get all users (admin only)
 const getAllUsers = async (req, res) => {
   try {
-    const users = await User.find().select("-password");
+    const users = await User.find().select(
+      "_id fullName email avatar role isVerified authProvider lastLogin createdAt updatedAt"
+    );
 
     res.status(200).json({
       success: true,
@@ -13,11 +31,7 @@ const getAllUsers = async (req, res) => {
       users,
     });
   } catch (error) {
-    res.status(500).json({
-      success: false,
-      message: "Server error",
-      error: error.message,
-    });
+    sendServerError(res, "Server error", error);
   }
 };
 
@@ -31,6 +45,7 @@ const updateProfile = async (req, res) => {
     if (user) {
       user.fullName = fullName || user.fullName;
 
+      let emailChanged = false;
       if (email && email !== user.email) {
         const emailExists = await User.findOne({ email });
         if (emailExists) {
@@ -41,13 +56,28 @@ const updateProfile = async (req, res) => {
         }
         user.email = email;
         user.isVerified = false;
+        user.generateVerificationToken();
+        emailChanged = true;
       }
 
       const updatedUser = await user.save();
+      let verificationEmailSent = null;
+      if (emailChanged) {
+        const verificationUrl = `${process.env.FRONTEND_URL}/verify-email/${updatedUser.verificationToken}`;
+        verificationEmailSent = await sendEmailSafely({
+          email: updatedUser.email,
+          subject: "Verify Your Email - Unibro",
+          html: verificationEmail(updatedUser.fullName, verificationUrl),
+        });
+      }
 
       res.status(200).json({
         success: true,
-        message: "Profile updated successfully",
+        message:
+          emailChanged && !verificationEmailSent
+            ? "Profile updated, but the verification email could not be delivered. Use resend verification."
+            : "Profile updated successfully",
+        verificationEmailSent,
         user: {
           id: updatedUser._id,
           fullName: updatedUser.fullName,
@@ -64,11 +94,7 @@ const updateProfile = async (req, res) => {
       });
     }
   } catch (error) {
-    res.status(500).json({
-      success: false,
-      message: "Server error",
-      error: error.message,
-    });
+    sendServerError(res, "Server error", error);
   }
 };
 
@@ -76,13 +102,6 @@ const updateProfile = async (req, res) => {
 const changePassword = async (req, res) => {
   try {
     const { currentPassword, newPassword } = req.body;
-
-    if (!currentPassword || !newPassword) {
-      return res.status(400).json({
-        success: false,
-        message: "Please provide current and new passwords",
-      });
-    }
 
     const user = await User.findById(req.user._id).select("+password");
 
@@ -109,24 +128,10 @@ const changePassword = async (req, res) => {
       });
     }
 
-    if (newPassword.length < 6) {
-      return res.status(400).json({
-        success: false,
-        message: "New password must be at least 6 characters",
-      });
-    }
-
-    if (!/\d/.test(newPassword)) {
-      return res.status(400).json({
-        success: false,
-        message: "New password must contain at least one number",
-      });
-    }
-
     user.password = newPassword;
     await user.save();
 
-    await sendEmail({
+    const notificationSent = await sendEmailSafely({
       email: user.email,
       subject: "Password Changed Successfully - Unibro",
       html: passwordResetSuccessEmail(user.fullName),
@@ -135,13 +140,10 @@ const changePassword = async (req, res) => {
     res.status(200).json({
       success: true,
       message: "Password changed successfully",
+      notificationSent,
     });
   } catch (error) {
-    res.status(500).json({
-      success: false,
-      message: "Server error while changing password",
-      error: error.message,
-    });
+    sendServerError(res, "Server error while changing password", error);
   }
 };
 
