@@ -1,5 +1,6 @@
 const ChatMessage = require("../models/ChatMessage");
 const User = require("../models/user");
+const { sendServerError } = require("../utils/httpError");
 
 // Get chat messages for a room with pagination
 const getRoomMessages = async (req, res) => {
@@ -19,10 +20,11 @@ const getRoomMessages = async (req, res) => {
     }
 
     const messages = await ChatMessage.find(query)
+      .select("-userEmail")
       .sort({ createdAt: -1 })
       .limit(parseInt(limit))
-      .populate("userId", "fullName email")
-      .populate("replyTo");
+      .populate("userId", "fullName")
+      .populate({ path: "replyTo", select: "-userEmail" });
 
     const sortedMessages = messages.reverse();
 
@@ -33,11 +35,7 @@ const getRoomMessages = async (req, res) => {
       hasMore: messages.length === parseInt(limit),
     });
   } catch (error) {
-    res.status(500).json({
-      success: false,
-      message: "Failed to fetch messages",
-      error: error.message,
-    });
+    sendServerError(res, "Failed to fetch messages", error);
   }
 };
 
@@ -54,10 +52,10 @@ const sendMessage = async (req, res) => {
       replyTo,
     } = req.body;
 
-    if (!department || !semester || !message) {
-      return res.status(400).json({
+    if (!req.user.isVerified) {
+      return res.status(403).json({
         success: false,
-        message: "Department, semester, and message are required",
+        message: "Verify your email before sending messages",
       });
     }
 
@@ -74,24 +72,22 @@ const sendMessage = async (req, res) => {
       replyTo,
       userId: req.user._id,
       userName: req.user.fullName,
-      userEmail: req.user.email,
     });
 
-    await newMessage.populate("userId", "fullName email");
+    await newMessage.populate("userId", "fullName");
     if (replyTo) {
-      await newMessage.populate("replyTo");
+      await newMessage.populate({ path: "replyTo", select: "-userEmail" });
     }
+
+    const safeMessage = newMessage.toObject();
+    delete safeMessage.userEmail;
 
     res.status(201).json({
       success: true,
-      message: newMessage,
+      message: safeMessage,
     });
   } catch (error) {
-    res.status(500).json({
-      success: false,
-      message: "Failed to send message",
-      error: error.message,
-    });
+    sendServerError(res, "Failed to send message", error);
   }
 };
 
@@ -126,11 +122,7 @@ const deleteMessage = async (req, res) => {
       message: "Message deleted successfully",
     });
   } catch (error) {
-    res.status(500).json({
-      success: false,
-      message: "Failed to delete message",
-      error: error.message,
-    });
+    sendServerError(res, "Failed to delete message", error);
   }
 };
 
@@ -152,11 +144,7 @@ const getUnreadCount = async (req, res) => {
       unreadCount: count,
     });
   } catch (error) {
-    res.status(500).json({
-      success: false,
-      message: "Failed to get unread count",
-      error: error.message,
-    });
+    sendServerError(res, "Failed to get unread count", error);
   }
 };
 
@@ -174,35 +162,7 @@ const markAsRead = async (req, res) => {
       message: "Marked as read",
     });
   } catch (error) {
-    res.status(500).json({
-      success: false,
-      message: "Failed to mark as read",
-      error: error.message,
-    });
-  }
-};
-
-// Get active users in a room
-const getActiveUsers = async (req, res) => {
-  try {
-    const { department, semester } = req.params;
-    const fiveMinutesAgo = new Date(Date.now() - 5 * 60 * 1000);
-
-    const activeUsers = await User.find({
-      lastActive: { $gt: fiveMinutesAgo },
-    }).select("fullName email lastActive");
-
-    res.status(200).json({
-      success: true,
-      count: activeUsers.length,
-      users: activeUsers,
-    });
-  } catch (error) {
-    res.status(500).json({
-      success: false,
-      message: "Failed to get active users",
-      error: error.message,
-    });
+    sendServerError(res, "Failed to mark as read", error);
   }
 };
 
@@ -212,5 +172,4 @@ module.exports = {
   deleteMessage,
   getUnreadCount,
   markAsRead,
-  getActiveUsers,
 };

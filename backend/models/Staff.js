@@ -1,4 +1,5 @@
 const mongoose = require("mongoose");
+const { DEPARTMENTS } = require("../constants/departments");
 
 const staffSchema = new mongoose.Schema(
   {
@@ -17,18 +18,7 @@ const staffSchema = new mongoose.Schema(
     department: {
       type: String,
       required: [true, "Department is required"],
-      enum: [
-        "Computer Science",
-        "Business Administration",
-        "Engineering",
-        "Mathematics",
-        "Physics",
-        "Chemistry",
-        "English",
-        "Economics",
-        "Law",
-        "Medicine",
-      ],
+      enum: DEPARTMENTS,
     },
     image: {
       type: String,

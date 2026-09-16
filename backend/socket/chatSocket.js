@@ -1,201 +1,229 @@
+const jwt = require("jsonwebtoken");
 const ChatMessage = require("../models/ChatMessage");
 const User = require("../models/user");
+const { DEPARTMENTS } = require("../constants/departments");
 
-// Store active users per room
-const activeUsers = new Map(); // roomId -> Set of userIds
+const PRESENCE_HEARTBEAT_MS = 20_000;
 
-const setupChatSocket = (io) => {
-  io.on("connection", (socket) => {
-    console.log(`✅ User connected: ${socket.id}`);
+const exposedError = (message) => Object.assign(new Error(message), { exposed: true });
+const clientErrorMessage = (error, fallback) =>
+  error.exposed ? error.message : fallback;
 
-    // Join a chat room (department + semester)
-    socket.on(
-      "join_room",
-      async ({ department, semester, userId, userName }) => {
-        try {
-          const roomId = `${department}_${semester}`;
-          socket.join(roomId);
+const isValidRoom = (department, semester) =>
+  DEPARTMENTS.includes(department) && /^[1-8]$/.test(String(semester));
 
-          // Store user info with socket
-          socket.userId = userId;
-          socket.userName = userName;
-          socket.roomId = roomId;
+const publicMessage = (message) => {
+  const value = message.toObject ? message.toObject() : { ...message };
+  delete value.userEmail;
+  if (value.replyTo && typeof value.replyTo === "object") {
+    delete value.replyTo.userEmail;
+  }
+  return value;
+};
 
-          // Track active users
-          if (!activeUsers.has(roomId)) {
-            activeUsers.set(roomId, new Set());
-          }
-          activeUsers.get(roomId).add(userId);
+const createSocketAuthenticator = (UserModel = User) => async (socket, next) => {
+  try {
+    const token = socket.handshake.auth?.token;
+    if (!token) return next(new Error("Authentication required"));
 
-          // Update user's last active time
-          await User.findByIdAndUpdate(userId, { lastActive: Date.now() });
-
-          console.log(`👤 ${userName} joined room: ${roomId}`);
-
-          // Notify room about new user
-          const activeCount = activeUsers.get(roomId).size;
-          io.to(roomId).emit("user_joined", {
-            userId,
-            userName,
-            activeCount,
-            message: `${userName} joined the chat`,
-          });
-
-          // Send active users list
-          io.to(roomId).emit("active_users", {
-            count: activeCount,
-            users: Array.from(activeUsers.get(roomId)),
-          });
-        } catch (error) {
-          console.error("Join room error:", error);
-          socket.emit("error", { message: "Failed to join room" });
-        }
-      }
+    const decoded = jwt.verify(token, process.env.JWT_SECRET);
+    const user = await UserModel.findById(decoded.id).select(
+      "fullName email role isVerified"
     );
+    if (!user) return next(new Error("Authentication failed"));
 
-    // Send message
-    socket.on("send_message", async (data) => {
+    socket.user = user;
+    next();
+  } catch {
+    next(new Error("Authentication failed"));
+  }
+};
+
+const setupChatSocket = (
+  io,
+  { UserModel = User, ChatMessageModel = ChatMessage, presenceStore } = {},
+) => {
+  if (!presenceStore) throw new Error("A shared presence store is required");
+  io.use(createSocketAuthenticator(UserModel));
+
+  io.on("connection", (socket) => {
+    const authenticatedUserId = socket.user._id.toString();
+    let heartbeatTimer;
+
+    const emitPresence = async (roomId) => {
+      const users = await presenceStore.list(roomId);
+      io.to(roomId).emit("active_users", { count: users.length, users });
+    };
+
+    const stopHeartbeat = () => {
+      if (heartbeatTimer) clearInterval(heartbeatTimer);
+      heartbeatTimer = null;
+    };
+
+    const startHeartbeat = () => {
+      stopHeartbeat();
+      heartbeatTimer = setInterval(async () => {
+        if (!socket.roomId) return;
+        try {
+          await presenceStore.touch(socket.id, socket.roomId, socket.user);
+          await emitPresence(socket.roomId);
+        } catch {
+          // The next heartbeat or reconnect will retry without crashing a socket.
+        }
+      }, PRESENCE_HEARTBEAT_MS);
+      heartbeatTimer.unref?.();
+    };
+
+    const leaveCurrentRoom = async () => {
+      if (!socket.roomId) return;
+      const roomId = socket.roomId;
+      socket.roomId = null;
+      stopHeartbeat();
+      socket.leave(roomId);
+      await presenceStore.remove(socket.id);
+      await emitPresence(roomId);
+    };
+
+    socket.on("join_room", async ({ department, semester } = {}, callback) => {
       try {
-        const {
-          department,
-          semester,
-          message,
-          userId,
-          userName,
-          userEmail,
-          replyTo,
-        } = data;
-        const roomId = `${department}_${semester}`;
-
-        // Validate required fields
-        if (!userId || !userName || !userEmail || !message) {
-          console.error("❌ Missing required fields:", {
-            userId,
-            userName,
-            userEmail,
-            message,
-          });
-          socket.emit("error", { message: "Missing required fields" });
-          return;
+        if (!isValidRoom(department, semester)) {
+          throw exposedError("Invalid chat room");
         }
 
-        console.log("📝 Creating message:", {
-          userId,
-          userName,
-          message: message.substring(0, 20),
+        const roomId = `${department}_${semester}`;
+        if (socket.roomId && socket.roomId !== roomId) {
+          await leaveCurrentRoom();
+        }
+
+        if (socket.roomId !== roomId) {
+          socket.join(roomId);
+        }
+
+        socket.roomId = roomId;
+        await presenceStore.touch(socket.id, roomId, socket.user);
+        startHeartbeat();
+        await UserModel.findByIdAndUpdate(authenticatedUserId, {
+          lastActive: Date.now(),
         });
 
-        // Save message to database
-        const newMessage = await ChatMessage.create({
+        await emitPresence(roomId);
+
+        if (typeof callback === "function") callback({ success: true, roomId });
+      } catch (error) {
+        const message = clientErrorMessage(error, "Failed to join room");
+        socket.emit("chat_error", { message });
+        if (typeof callback === "function") callback({ success: false, message });
+      }
+    });
+
+    socket.on("send_message", async (data = {}, callback) => {
+      try {
+        const { department, semester, message, replyTo } = data;
+        const roomId = `${department}_${semester}`;
+
+        if (!socket.user.isVerified) {
+          throw exposedError("Verify your email before sending messages");
+        }
+        if (!isValidRoom(department, semester) || socket.roomId !== roomId) {
+          throw exposedError("Join the chat room before sending messages");
+        }
+        if (typeof message !== "string" || !message.trim()) {
+          throw exposedError("Message is required");
+        }
+        if (message.trim().length > 2000) {
+          throw exposedError("Message cannot exceed 2000 characters");
+        }
+        if (replyTo && !/^[a-f\d]{24}$/i.test(String(replyTo))) {
+          throw exposedError("Invalid reply target");
+        }
+
+        const newMessage = await ChatMessageModel.create({
           roomId,
           department,
-          semester,
-          message,
+          semester: String(semester),
+          message: message.trim(),
           messageType: "text",
-          userId, // MongoDB will convert string to ObjectId
-          userName,
-          userEmail,
+          userId: socket.user._id,
+          userName: socket.user.fullName,
           replyTo: replyTo || null,
         });
 
-        // Populate user data
-        await newMessage.populate("userId", "fullName email");
+        await newMessage.populate("userId", "fullName");
         if (replyTo) {
-          await newMessage.populate("replyTo");
+          await newMessage.populate({ path: "replyTo", select: "-userEmail" });
         }
 
-        // Broadcast to room
-        io.to(roomId).emit("receive_message", newMessage);
-
-        console.log(`💬 Message sent in ${roomId} by ${userName}`);
+        const safeMessage = publicMessage(newMessage);
+        io.to(roomId).emit("receive_message", safeMessage);
+        if (typeof callback === "function") {
+          callback({ success: true, message: safeMessage });
+        }
       } catch (error) {
-        console.error("Send message error:", error);
-        socket.emit("error", { message: "Failed to send message" });
+        const message = clientErrorMessage(error, "Failed to send message");
+        socket.emit("chat_error", { message });
+        if (typeof callback === "function") callback({ success: false, message });
       }
     });
 
-    // User typing indicator
-    socket.on("typing", ({ roomId, userName }) => {
-      socket.to(roomId).emit("user_typing", { userName });
+    socket.on("typing", ({ roomId } = {}) => {
+      if (roomId === socket.roomId) {
+        socket.to(roomId).emit("user_typing", {
+          userName: socket.user.fullName,
+        });
+      }
     });
 
-    socket.on("stop_typing", ({ roomId }) => {
-      socket.to(roomId).emit("user_stop_typing");
+    socket.on("stop_typing", ({ roomId } = {}) => {
+      if (roomId === socket.roomId) socket.to(roomId).emit("user_stop_typing");
     });
 
-    // Delete message
-    socket.on("delete_message", async ({ messageId, roomId }) => {
+    socket.on("delete_message", async ({ messageId, roomId } = {}, callback) => {
       try {
-        const message = await ChatMessage.findById(messageId);
-
-        if (message && message.userId.toString() === socket.userId) {
-          message.isDeleted = true;
-          message.deletedAt = Date.now();
-          message.message = "This message was deleted";
-          await message.save();
-
-          // Notify room
-          io.to(roomId).emit("message_deleted", {
-            messageId,
-            deletedMessage: message,
-          });
+        if (!messageId || roomId !== socket.roomId) {
+          throw exposedError("Invalid delete request");
         }
+
+        const message = await ChatMessageModel.findById(messageId);
+        if (!message || message.roomId !== roomId) {
+          throw exposedError("Message not found");
+        }
+        if (message.userId.toString() !== authenticatedUserId) {
+          throw exposedError("Not authorized to delete this message");
+        }
+
+        message.isDeleted = true;
+        message.deletedAt = Date.now();
+        message.message = "This message was deleted";
+        await message.save();
+
+        io.to(roomId).emit("message_deleted", {
+          messageId,
+          deletedMessage: publicMessage(message),
+        });
+        if (typeof callback === "function") callback({ success: true });
       } catch (error) {
-        console.error("Delete message error:", error);
+        const message = clientErrorMessage(error, "Failed to delete message");
+        socket.emit("chat_error", { message });
+        if (typeof callback === "function") callback({ success: false, message });
       }
     });
 
-    // Leave room
-    socket.on("leave_room", ({ roomId, userId, userName }) => {
-      socket.leave(roomId);
-
-      // Remove from active users
-      if (activeUsers.has(roomId)) {
-        activeUsers.get(roomId).delete(userId);
-        const activeCount = activeUsers.get(roomId).size;
-
-        // Notify room
-        io.to(roomId).emit("user_left", {
-          userId,
-          userName,
-          activeCount,
-          message: `${userName} left the chat`,
-        });
-
-        io.to(roomId).emit("active_users", {
-          count: activeCount,
-          users: Array.from(activeUsers.get(roomId)),
-        });
-      }
-
-      console.log(`👋 ${userName} left room: ${roomId}`);
+    socket.on("leave_room", async ({ roomId } = {}) => {
+      if (roomId === socket.roomId) await leaveCurrentRoom();
     });
 
-    // Handle disconnect
-    socket.on("disconnect", () => {
-      console.log(`❌ User disconnected: ${socket.id}`);
-
-      // Remove from active users
-      if (socket.roomId && socket.userId) {
-        if (activeUsers.has(socket.roomId)) {
-          activeUsers.get(socket.roomId).delete(socket.userId);
-          const activeCount = activeUsers.get(socket.roomId).size;
-
-          io.to(socket.roomId).emit("user_left", {
-            userId: socket.userId,
-            userName: socket.userName,
-            activeCount,
-            message: `${socket.userName} disconnected`,
-          });
-
-          io.to(socket.roomId).emit("active_users", {
-            count: activeCount,
-            users: Array.from(activeUsers.get(socket.roomId)),
-          });
-        }
+    socket.on("disconnect", async () => {
+      try {
+        await leaveCurrentRoom();
+      } catch {
+        stopHeartbeat();
       }
     });
   });
 };
 
 module.exports = setupChatSocket;
+module.exports.createSocketAuthenticator = createSocketAuthenticator;
+module.exports.isValidRoom = isValidRoom;
+module.exports.publicMessage = publicMessage;
+module.exports.PRESENCE_HEARTBEAT_MS = PRESENCE_HEARTBEAT_MS;

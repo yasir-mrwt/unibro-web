@@ -36,10 +36,6 @@ const chatMessageSchema = new mongoose.Schema(
       type: String,
       required: true,
     },
-    userEmail: {
-      type: String,
-      required: true,
-    },
     // Message type (text, image, file, etc.)
     messageType: {
       type: String,

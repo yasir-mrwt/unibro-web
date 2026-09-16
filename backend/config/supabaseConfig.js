@@ -1,15 +1,49 @@
 const { createClient } = require("@supabase/supabase-js");
+const crypto = require("crypto");
+const path = require("path");
 
-// Initialize Supabase client with service role for backend operations
-const supabaseUrl = process.env.SUPABASE_URL;
-const supabaseServiceKey = process.env.SUPABASE_SERVICE_KEY;
+let supabase;
+const getBucket = () => process.env.SUPABASE_BUCKET || "unibro-files";
 
-const supabase = createClient(supabaseUrl, supabaseServiceKey, {
-  auth: {
-    autoRefreshToken: false,
-    persistSession: false,
-  },
-});
+const getSupabase = () => {
+  if (!process.env.SUPABASE_URL || !process.env.SUPABASE_SERVICE_KEY) {
+    throw new Error("Supabase Storage is not configured");
+  }
+
+  if (!supabase) {
+    supabase = createClient(
+      process.env.SUPABASE_URL,
+      process.env.SUPABASE_SERVICE_KEY,
+      {
+        auth: { autoRefreshToken: false, persistSession: false },
+      },
+    );
+  }
+
+  return supabase;
+};
+
+const uploadBuffer = async (folder, fileBuffer, fileName, contentType) => {
+  const extension = path.extname(fileName).toLowerCase();
+  const filePath = `${folder}/${crypto.randomUUID()}${extension}`;
+  const client = getSupabase();
+
+  const { error } = await client.storage
+    .from(getBucket())
+    .upload(filePath, fileBuffer, {
+      cacheControl: "3600",
+      upsert: false,
+      contentType,
+    });
+
+  if (error) throw error;
+
+  const { data } = client.storage.from(getBucket()).getPublicUrl(filePath);
+  return { fileUrl: data.publicUrl, storagePath: filePath };
+};
+
+const uploadResourceFile = (fileBuffer, fileName, contentType) =>
+  uploadBuffer("resources", fileBuffer, fileName, contentType);
 
 /**
  * Delete file from Supabase Storage
@@ -24,14 +58,14 @@ const deleteFileFromSupabase = async (fileUrl) => {
     let filePath = fileUrl;
     if (fileUrl.includes("http")) {
       const url = new URL(fileUrl);
-      const pathParts = url.pathname.split("/unibro-files/");
+      const pathParts = url.pathname.split(`/${getBucket()}/`);
       if (pathParts.length > 1) {
         filePath = pathParts[1];
       }
     }
 
-    const { error } = await supabase.storage
-      .from("unibro-files")
+    const { error } = await getSupabase()
+      .storage.from(getBucket())
       .remove([filePath]);
 
     if (error) {
@@ -56,8 +90,8 @@ const deleteStaffImage = async (storagePath) => {
       return { success: false, error: "No storage path provided" };
     }
 
-    const { error } = await supabase.storage
-      .from("unibro-files")
+    const { error } = await getSupabase()
+      .storage.from(getBucket())
       .remove([storagePath]);
 
     if (error) {
@@ -76,35 +110,19 @@ const deleteStaffImage = async (storagePath) => {
 /**
  * Upload staff image to Supabase Storage
  */
-const uploadStaffImage = async (fileBuffer, fileName) => {
+const uploadStaffImage = async (fileBuffer, fileName, contentType) => {
   try {
-    const timestamp = Date.now();
-    const fileExt = fileName.split(".").pop();
-    const uniqueFileName = `staff-${timestamp}-${Math.random()
-      .toString(36)
-      .substring(7)}.${fileExt}`;
-    const filePath = `staff-profiles/${uniqueFileName}`;
-
-    const { data, error } = await supabase.storage
-      .from("unibro-files")
-      .upload(filePath, fileBuffer, {
-        cacheControl: "3600",
-        upsert: false,
-        contentType: "image/jpeg",
-      });
-
-    if (error) {
-      throw error;
-    }
-
-    const { data: urlData } = supabase.storage
-      .from("unibro-files")
-      .getPublicUrl(filePath);
+    const result = await uploadBuffer(
+      "staff-profiles",
+      fileBuffer,
+      fileName,
+      contentType,
+    );
 
     return {
       success: true,
-      imageUrl: urlData.publicUrl,
-      storagePath: filePath,
+      imageUrl: result.fileUrl,
+      storagePath: result.storagePath,
     };
   } catch (error) {
     return {
@@ -135,7 +153,8 @@ const extractStaffImagePath = (imageUrl) => {
 };
 
 module.exports = {
-  supabase,
+  getSupabase,
+  uploadResourceFile,
   deleteFileFromSupabase,
   deleteStaffImage,
   uploadStaffImage,

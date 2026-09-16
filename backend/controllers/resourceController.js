@@ -6,10 +6,31 @@ const {
   resourceRejectedEmail,
   newResourceSubmissionEmail,
 } = require("../utils/emailTemplates");
-const { deleteFileFromSupabase } = require("../config/supabaseConfig");
+const {
+  deleteFileFromSupabase,
+  uploadResourceFile,
+} = require("../config/supabaseConfig");
+const { sendServerError } = require("../utils/httpError");
+
+const sendEmailSafely = async (options) => {
+  try {
+    await sendEmail(options);
+    return true;
+  } catch (error) {
+    if (process.env.NODE_ENV === "development") {
+      console.error(`Email delivery failed: ${error.message}`);
+    }
+    return false;
+  }
+};
+
+const escapeRegExp = (value) => value.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
 
 // Upload new resource (verified users only)
 const uploadResource = async (req, res) => {
+  let uploadedFile;
+  let resource;
+
   try {
     const {
       courseName,
@@ -21,10 +42,6 @@ const uploadResource = async (req, res) => {
       section,
       batch,
       year,
-      fileName,
-      fileUrl,
-      fileSize,
-      fileType,
       pages,
       thumbnailUrl,
     } = req.body;
@@ -37,10 +54,23 @@ const uploadResource = async (req, res) => {
       });
     }
 
+    if (!req.file) {
+      return res.status(400).json({
+        success: false,
+        message: "A resource file is required",
+      });
+    }
+
+    uploadedFile = await uploadResourceFile(
+      req.file.buffer,
+      req.file.originalname,
+      req.file.mimetype
+    );
+
     const isAdmin = req.user.role === "admin";
     const status = isAdmin ? "approved" : "pending";
 
-    const resource = await Resource.create({
+    resource = await Resource.create({
       courseName,
       title,
       description,
@@ -50,10 +80,11 @@ const uploadResource = async (req, res) => {
       section,
       batch,
       year,
-      fileName,
-      fileUrl,
-      fileSize,
-      fileType,
+      fileName: req.file.originalname,
+      fileUrl: uploadedFile.fileUrl,
+      storagePath: uploadedFile.storagePath,
+      fileSize: `${(req.file.size / (1024 * 1024)).toFixed(2)} MB`,
+      fileType: req.file.mimetype,
       pages: pages || 0,
       thumbnailUrl,
       uploadedBy: req.user._id,
@@ -66,11 +97,11 @@ const uploadResource = async (req, res) => {
       }),
     });
 
-    const admins = await User.find({ role: "admin" });
-
+    let notificationsSent = 0;
     if (!isAdmin) {
+      const admins = await User.find({ role: "admin" }).select("fullName email");
       for (const admin of admins) {
-        await sendEmail({
+        const sent = await sendEmailSafely({
           email: admin.email,
           subject: "New Resource Submitted for Approval - Unibro",
           html: newResourceSubmissionEmail(
@@ -83,6 +114,7 @@ const uploadResource = async (req, res) => {
             semester
           ),
         });
+        if (sent) notificationsSent += 1;
       }
     }
 
@@ -93,14 +125,14 @@ const uploadResource = async (req, res) => {
     res.status(201).json({
       success: true,
       message: successMessage,
+      notificationsSent,
       resource,
     });
   } catch (error) {
-    res.status(500).json({
-      success: false,
-      message: "Failed to upload resource",
-      error: error.message,
-    });
+    if (uploadedFile?.storagePath && !resource) {
+      await deleteFileFromSupabase(uploadedFile.storagePath);
+    }
+    sendServerError(res, "Failed to upload resource", error);
   }
 };
 
@@ -132,17 +164,19 @@ const getResources = async (req, res) => {
     }
 
     if (search) {
+      const safeSearch = escapeRegExp(search);
       query.$or = [
-        { courseName: { $regex: search, $options: "i" } },
-        { title: { $regex: search, $options: "i" } },
-        { description: { $regex: search, $options: "i" } },
-        { department: { $regex: search, $options: "i" } },
-        { semester: { $regex: search, $options: "i" } },
+        { courseName: { $regex: safeSearch, $options: "i" } },
+        { title: { $regex: safeSearch, $options: "i" } },
+        { description: { $regex: safeSearch, $options: "i" } },
+        { department: { $regex: safeSearch, $options: "i" } },
+        { semester: { $regex: safeSearch, $options: "i" } },
       ];
     }
 
     const resources = await Resource.find(query)
-      .populate("uploadedBy", "fullName email")
+      .select("-uploaderEmail")
+      .populate("uploadedBy", "fullName")
       .sort({ createdAt: -1 });
 
     const groupedByYear = resources.reduce((acc, resource) => {
@@ -160,11 +194,7 @@ const getResources = async (req, res) => {
       resources: groupedByYear,
     });
   } catch (error) {
-    res.status(500).json({
-      success: false,
-      message: "Failed to fetch resources",
-      error: error.message,
-    });
+    sendServerError(res, "Failed to fetch resources", error);
   }
 };
 
@@ -187,11 +217,7 @@ const getMyResources = async (req, res) => {
       resources: groupedByStatus,
     });
   } catch (error) {
-    res.status(500).json({
-      success: false,
-      message: "Failed to fetch your resources",
-      error: error.message,
-    });
+    sendServerError(res, "Failed to fetch your resources", error);
   }
 };
 
@@ -217,8 +243,16 @@ const deleteResource = async (req, res) => {
       });
     }
 
-    if (resource.fileUrl) {
-      await deleteFileFromSupabase(resource.fileUrl);
+    if (resource.storagePath || resource.fileUrl) {
+      const storageResult = await deleteFileFromSupabase(
+        resource.storagePath || resource.fileUrl
+      );
+      if (!storageResult.success) {
+        return res.status(502).json({
+          success: false,
+          message: "File storage cleanup failed; the resource was not deleted",
+        });
+      }
     }
 
     await resource.deleteOne();
@@ -228,11 +262,7 @@ const deleteResource = async (req, res) => {
       message: "Resource and file deleted successfully",
     });
   } catch (error) {
-    res.status(500).json({
-      success: false,
-      message: "Failed to delete resource",
-      error: error.message,
-    });
+    sendServerError(res, "Failed to delete resource", error);
   }
 };
 
@@ -249,11 +279,7 @@ const getPendingResources = async (req, res) => {
       resources,
     });
   } catch (error) {
-    res.status(500).json({
-      success: false,
-      message: "Failed to fetch pending resources",
-      error: error.message,
-    });
+    sendServerError(res, "Failed to fetch pending resources", error);
   }
 };
 
@@ -281,7 +307,7 @@ const approveResource = async (req, res) => {
     resource.reviewedAt = Date.now();
     await resource.save();
 
-    await sendEmail({
+    const notificationSent = await sendEmailSafely({
       email: resource.uploaderEmail,
       subject: "Your Resource Has Been Approved! 🎉 - Unibro",
       html: resourceApprovedEmail(
@@ -294,14 +320,11 @@ const approveResource = async (req, res) => {
     res.status(200).json({
       success: true,
       message: "Resource approved successfully",
+      notificationSent,
       resource,
     });
   } catch (error) {
-    res.status(500).json({
-      success: false,
-      message: "Failed to approve resource",
-      error: error.message,
-    });
+    sendServerError(res, "Failed to approve resource", error);
   }
 };
 
@@ -333,17 +356,30 @@ const rejectResource = async (req, res) => {
       });
     }
 
-    if (resource.fileUrl) {
-      await deleteFileFromSupabase(resource.fileUrl);
-    }
-
     resource.status = "rejected";
     resource.rejectionReason = reason;
     resource.reviewedBy = req.user._id;
     resource.reviewedAt = Date.now();
     await resource.save();
 
-    await sendEmail({
+    if (resource.storagePath || resource.fileUrl) {
+      const storageResult = await deleteFileFromSupabase(
+        resource.storagePath || resource.fileUrl
+      );
+      if (!storageResult.success) {
+        resource.status = "pending";
+        resource.rejectionReason = null;
+        resource.reviewedBy = null;
+        resource.reviewedAt = null;
+        await resource.save();
+        return res.status(502).json({
+          success: false,
+          message: "File storage cleanup failed; the resource was not rejected",
+        });
+      }
+    }
+
+    const notificationSent = await sendEmailSafely({
       email: resource.uploaderEmail,
       subject: "Resource Submission Update - Unibro",
       html: resourceRejectedEmail(
@@ -357,14 +393,11 @@ const rejectResource = async (req, res) => {
     res.status(200).json({
       success: true,
       message: "Resource rejected and file deleted",
+      notificationSent,
       resource,
     });
   } catch (error) {
-    res.status(500).json({
-      success: false,
-      message: "Failed to reject resource",
-      error: error.message,
-    });
+    sendServerError(res, "Failed to reject resource", error);
   }
 };
 
@@ -387,11 +420,7 @@ const incrementDownload = async (req, res) => {
       message: "Download count updated",
     });
   } catch (error) {
-    res.status(500).json({
-      success: false,
-      message: "Failed to update download count",
-      error: error.message,
-    });
+    sendServerError(res, "Failed to update download count", error);
   }
 };
 
@@ -414,11 +443,7 @@ const incrementView = async (req, res) => {
       message: "View count updated",
     });
   } catch (error) {
-    res.status(500).json({
-      success: false,
-      message: "Failed to update view count",
-      error: error.message,
-    });
+    sendServerError(res, "Failed to update view count", error);
   }
 };
 
@@ -450,11 +475,7 @@ const getAllResourcesAdmin = async (req, res) => {
       resources,
     });
   } catch (error) {
-    res.status(500).json({
-      success: false,
-      message: "Failed to fetch resources",
-      error: error.message,
-    });
+    sendServerError(res, "Failed to fetch resources", error);
   }
 };
 
@@ -496,11 +517,7 @@ const getResourceCounts = async (req, res) => {
       counts: countObject,
     });
   } catch (error) {
-    res.status(500).json({
-      success: false,
-      message: "Error fetching resource counts",
-      error: error.message,
-    });
+    sendServerError(res, "Error fetching resource counts", error);
   }
 };
 

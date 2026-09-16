@@ -1,315 +1,158 @@
-const API_URL = import.meta.env.VITE_API_URL + "/api/auth";
+import { API_URL } from "./config";
 
-// Cache for user data
+const AUTH_API_URL = `${API_URL}/api/auth`;
+const USER_CACHE_DURATION = 1000;
 let cachedUser = null;
 let lastUserCheck = 0;
-const USER_CACHE_DURATION = 1000;
 
-// Register user
+const fetchJson = async (path, options, fallbackMessage) => {
+  const response = await fetch(`${AUTH_API_URL}${path}`, options);
+  const data = await response.json();
+  if (!response.ok) throw new Error(data.message || fallbackMessage);
+  return data;
+};
+
 export const register = async (userData) => {
-  try {
-    const response = await fetch(`${API_URL}/register`, {
+  const data = await fetchJson(
+    "/register",
+    {
       method: "POST",
-      headers: {
-        "Content-Type": "application/json",
-      },
-      credentials: "include",
+      headers: { "Content-Type": "application/json" },
       body: JSON.stringify(userData),
-    });
-
-    const data = await response.json();
-
-    if (!response.ok) {
-      throw new Error(data.message || "Registration failed");
-    }
-
-    if (data.success && data.token) {
-      const userWithToken = {
-        ...data.user,
-        token: data.token,
-      };
-      localStorage.setItem("user", JSON.stringify(userWithToken));
-      localStorage.setItem("token", data.token);
-      cachedUser = userWithToken;
-    }
-
-    return data;
-  } catch (error) {
-    throw error;
-  }
+    },
+    "Registration failed",
+  );
+  if (data.success && data.token) storeAuthData(data);
+  return data;
 };
 
-// Login user
 export const login = async (email, password, rememberMe = false) => {
-  try {
-    const response = await fetch(`${API_URL}/login`, {
+  const data = await fetchJson(
+    "/login",
+    {
       method: "POST",
-      headers: {
-        "Content-Type": "application/json",
-      },
-      credentials: "include",
+      headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ email, password, rememberMe }),
-    });
-
-    const data = await response.json();
-
-    if (!response.ok) {
-      throw new Error(data.message || "Login failed");
-    }
-
-    if (data.success && data.token) {
-      const userWithToken = {
-        ...data.user,
-        token: data.token,
-      };
-      localStorage.setItem("user", JSON.stringify(userWithToken));
-      localStorage.setItem("token", data.token);
-      cachedUser = userWithToken;
-    }
-
-    return data;
-  } catch (error) {
-    throw error;
-  }
+    },
+    "Login failed",
+  );
+  if (data.success && data.token) storeAuthData(data);
+  return data;
 };
 
-// Logout user
 export const logout = async () => {
-  try {
-    const token = getStoredToken();
-
-    const response = await fetch(`${API_URL}/logout`, {
-      method: "POST",
-      headers: {
-        "Content-Type": "application/json",
-        Authorization: `Bearer ${token}`,
-      },
-      credentials: "include",
-    });
-
-    const data = await response.json();
-
-    localStorage.removeItem("user");
-    localStorage.removeItem("token");
-    cachedUser = null;
-
-    return { success: true };
-  } catch (error) {
-    console.error("Logout error:", error);
-    localStorage.removeItem("user");
-    localStorage.removeItem("token");
-    cachedUser = null;
-    return { success: true };
-  }
-};
-
-// Get current user
-export const getCurrentUser = async () => {
-  try {
-    const response = await fetch(`${API_URL}/me`, {
-      method: "GET",
-      credentials: "include",
-    });
-
-    const data = await response.json();
-
-    if (!response.ok) {
-      throw new Error("Not authenticated");
-    }
-
-    return data.user;
-  } catch (error) {
-    throw error;
-  }
-};
-
-// Google OAuth login
-export const loginWithGoogle = () => {
-  window.location.href = import.meta.env.VITE_API_URL + `/api/auth/google`;
-};
-
-// Forgot password
-export const forgotPassword = async (email) => {
-  try {
-    const response = await fetch(`${API_URL}/forgot-password`, {
-      method: "POST",
-      headers: {
-        "Content-Type": "application/json",
-      },
-      body: JSON.stringify({ email }),
-    });
-
-    const data = await response.json();
-
-    if (!response.ok) {
-      throw new Error(data.message || "Failed to send reset email");
-    }
-
-    return data;
-  } catch (error) {
-    throw error;
-  }
-};
-
-// Reset password
-export const resetPassword = async (token, newPassword) => {
-  try {
-    const response = await fetch(`${API_URL}/reset-password/${token}`, {
-      method: "PUT",
-      headers: {
-        "Content-Type": "application/json",
-      },
-      body: JSON.stringify({ password: newPassword }),
-    });
-
-    const data = await response.json();
-
-    if (!response.ok) {
-      throw new Error(data.message || "Failed to reset password");
-    }
-
-    return data;
-  } catch (error) {
-    throw error;
-  }
-};
-
-// Resend verification email
-export const resendVerificationEmail = async () => {
-  try {
-    const token = getStoredToken();
-
-    if (!token) {
-      throw new Error("No authentication token found. Please log in again.");
-    }
-
-    const response = await fetch(`${API_URL}/resend-verification`, {
-      method: "POST",
-      credentials: "include",
-      headers: {
-        "Content-Type": "application/json",
-        Authorization: `Bearer ${token}`,
-      },
-    });
-
-    const data = await response.json();
-
-    if (!response.ok) {
-      if (response.status === 429) {
-        throw new Error(
-          data.message || "Too many requests. Please wait before trying again."
-        );
-      }
-      throw new Error(data.message || "Failed to resend verification email");
-    }
-
-    return data;
-  } catch (error) {
-    console.error("Resend verification error:", error);
-    throw error;
-  }
-};
-
-// Check if user is logged in
-export const isAuthenticated = () => {
-  const user = getStoredUser();
   const token = getStoredToken();
-  return !!(user && token);
+  try {
+    if (token) {
+      await fetch(`${AUTH_API_URL}/logout`, {
+        method: "POST",
+        headers: { Authorization: `Bearer ${token}` },
+      });
+    }
+  } catch {
+    // Local sign-out still completes when the API is temporarily unavailable.
+  } finally {
+    clearAuthData();
+  }
+  return { success: true };
 };
 
-// Get stored user with caching
+export const getCurrentUser = async () => {
+  const data = await fetchJson(
+    "/me",
+    { headers: { Authorization: `Bearer ${getStoredToken()}` } },
+    "Not authenticated",
+  );
+  return data.user;
+};
+
+export const loginWithGoogle = () => {
+  window.location.href = `${AUTH_API_URL}/google`;
+};
+
+export const forgotPassword = (email) =>
+  fetchJson(
+    "/forgot-password",
+    {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ email }),
+    },
+    "Failed to send reset email",
+  );
+
+export const resetPassword = (token, newPassword) =>
+  fetchJson(
+    `/reset-password/${encodeURIComponent(token)}`,
+    {
+      method: "PUT",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ password: newPassword }),
+    },
+    "Failed to reset password",
+  );
+
+export const resendVerificationEmail = () => {
+  const token = getStoredToken();
+  if (!token) {
+    throw new Error("No authentication token found. Please log in again.");
+  }
+  return fetchJson(
+    "/resend-verification",
+    { method: "POST", headers: { Authorization: `Bearer ${token}` } },
+    "Failed to resend verification email",
+  );
+};
+
+export const isAuthenticated = () =>
+  Boolean(getStoredUser() && getStoredToken());
+
 export const getStoredUser = () => {
   const now = Date.now();
-
-  if (cachedUser && now - lastUserCheck < USER_CACHE_DURATION) {
+  if (cachedUser && now - lastUserCheck < USER_CACHE_DURATION)
     return cachedUser;
-  }
 
   try {
-    const user = localStorage.getItem("user");
-    if (user) {
-      const parsed = JSON.parse(user);
-      cachedUser = parsed;
-      lastUserCheck = now;
-      return parsed;
-    }
-  } catch (error) {
-    console.error("Error parsing user from localStorage:", error);
+    const value = localStorage.getItem("user");
+    cachedUser = value ? JSON.parse(value) : null;
+  } catch {
+    localStorage.removeItem("user");
+    cachedUser = null;
   }
-
-  cachedUser = null;
   lastUserCheck = now;
-  return null;
+  return cachedUser;
 };
 
-// Get stored token
-export const getStoredToken = () => {
-  let token = localStorage.getItem("token");
+export const getStoredToken = () => localStorage.getItem("token");
+export const getUsernameFromEmail = (email) =>
+  email ? email.split("@")[0] : "User";
+export const getAuthToken = getStoredToken;
 
-  if (!token) {
-    const storedUser = localStorage.getItem("user");
-    if (storedUser) {
-      try {
-        const user = JSON.parse(storedUser);
-        token = user.token;
-      } catch (e) {
-        console.error("Error parsing user for token:", e);
-      }
-    }
-  }
-
-  return token;
-};
-
-// Get username from email
-export const getUsernameFromEmail = (email) => {
-  if (!email) return "User";
-  return email.split("@")[0];
-};
-
-// Get auth token for API calls
-export const getAuthToken = () => {
-  return getStoredToken();
-};
-
-// Update user in storage
 export const updateStoredUser = (updates) => {
   const currentUser = getStoredUser();
-  if (currentUser) {
-    const updatedUser = { ...currentUser, ...updates };
-    localStorage.setItem("user", JSON.stringify(updatedUser));
-    cachedUser = updatedUser;
+  if (!currentUser) return null;
 
-    window.dispatchEvent(
-      new CustomEvent("userUpdated", { detail: updatedUser })
-    );
-
-    return updatedUser;
-  }
-  return null;
+  const updatedUser = { ...currentUser, ...updates };
+  localStorage.setItem("user", JSON.stringify(updatedUser));
+  cachedUser = updatedUser;
+  lastUserCheck = Date.now();
+  window.dispatchEvent(new CustomEvent("userUpdated", { detail: updatedUser }));
+  return updatedUser;
 };
 
-// Store auth data after login/register
-export const storeAuthData = (userData) => {
-  if (userData.token) {
-    localStorage.setItem("token", userData.token);
-  }
-  if (userData.user) {
-    const userWithToken = {
-      ...userData.user,
-      token: userData.token || userData.user.token,
-    };
-    localStorage.setItem("user", JSON.stringify(userWithToken));
-    cachedUser = userWithToken;
-  } else {
-    localStorage.setItem("user", JSON.stringify(userData));
-    cachedUser = userData;
-  }
+export const storeAuthData = ({ token, user }) => {
+  if (!token || !user) throw new Error("Invalid authentication response");
+  const safeUser = { ...user };
+  delete safeUser.token;
+  localStorage.setItem("token", token);
+  localStorage.setItem("user", JSON.stringify(safeUser));
+  cachedUser = safeUser;
+  lastUserCheck = Date.now();
 };
 
-// Clear auth data on logout
 export const clearAuthData = () => {
   localStorage.removeItem("token");
   localStorage.removeItem("user");
   cachedUser = null;
+  lastUserCheck = 0;
 };

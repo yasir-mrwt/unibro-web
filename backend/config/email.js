@@ -1,9 +1,17 @@
 const Mailjet = require("node-mailjet");
 
 const sendEmail = async (options) => {
-  try {
-    console.log("📧 Attempting to send email via Mailjet to:", options.email);
+  const required = [
+    "MAILJET_API_KEY",
+    "MAILJET_SECRET_KEY",
+    "MAILJET_SENDER_EMAIL",
+  ];
+  const missing = required.filter((name) => !process.env[name]);
+  if (missing.length) {
+    throw new Error(`Email service is not configured: ${missing.join(", ")}`);
+  }
 
+  try {
     const mailjet = Mailjet.apiConnect(
       process.env.MAILJET_API_KEY,
       process.env.MAILJET_SECRET_KEY
@@ -13,8 +21,8 @@ const sendEmail = async (options) => {
       Messages: [
         {
           From: {
-            Email: "yasirmarwat09@gmail.com",
-            Name: "Unibro",
+            Email: process.env.MAILJET_SENDER_EMAIL,
+            Name: process.env.MAILJET_SENDER_NAME || "UniBro",
           },
           To: [
             {
@@ -31,14 +39,14 @@ const sendEmail = async (options) => {
     });
 
     const result = await request;
-    console.log("✅ Email sent successfully via Mailjet!");
     return {
       success: true,
       messageId: result.body.Messages[0].To[0].MessageID,
     };
   } catch (error) {
-    console.error("❌ Mailjet error:", error.message);
-    return { success: false, error: error.message };
+    const mailError = new Error("Email delivery failed");
+    mailError.cause = error;
+    throw mailError;
   }
 };
 

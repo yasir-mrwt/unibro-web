@@ -7,28 +7,50 @@ const {
   deleteMessage,
   getUnreadCount,
   markAsRead,
-  getActiveUsers,
 } = require("../controllers/chatController");
+const {
+  chatMessageValidation,
+  chatRoomValidation,
+  mongoIdValidation,
+  validate,
+} = require("../middleware/validation");
 
 // All routes require authentication
 router.use(protect);
 
 // Get messages for a specific room (department + semester)
-router.get("/messages/:department/:semester", getRoomMessages);
+router.get(
+  "/messages/:department/:semester",
+  chatRoomValidation,
+  validate,
+  getRoomMessages
+);
 
 // Send a new message
-router.post("/messages", sendMessage);
+router.post("/messages", chatMessageValidation, validate, sendMessage);
 
 // Delete a message
-router.delete("/messages/:messageId", deleteMessage);
+router.delete(
+  "/messages/:messageId",
+  mongoIdValidation("messageId"),
+  validate,
+  deleteMessage
+);
 
 // Get unread message count
-router.get("/unread/:department/:semester", getUnreadCount);
+router.get(
+  "/unread/:department/:semester",
+  chatRoomValidation,
+  validate,
+  getUnreadCount
+);
 
 // Mark messages as read
-router.put("/read/:department/:semester", markAsRead);
-
-// Get active users in a room
-router.get("/active/:department/:semester", getActiveUsers);
+router.put(
+  "/read/:department/:semester",
+  chatRoomValidation,
+  validate,
+  markAsRead
+);
 
 module.exports = router;

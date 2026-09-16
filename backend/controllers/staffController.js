@@ -1,5 +1,42 @@
 const Staff = require("../models/Staff");
-const { deleteStaffImage } = require("../config/supabaseConfig");
+const {
+  deleteStaffImage,
+  extractStaffImagePath,
+  uploadStaffImage,
+} = require("../config/supabaseConfig");
+const { DEPARTMENTS } = require("../constants/departments");
+const { sendServerError } = require("../utils/httpError");
+
+const escapeRegExp = (value) => value.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+
+const parseArrayField = (value) => {
+  if (Array.isArray(value)) return value;
+  if (!value) return [];
+
+  try {
+    const parsed = JSON.parse(value);
+    return Array.isArray(parsed) ? parsed : [];
+  } catch {
+    return [];
+  }
+};
+
+const buildStaffData = (body) => ({
+  name: body.name,
+  email: body.email,
+  department: body.department,
+  courses: parseArrayField(body.courses),
+  qualification: body.qualification,
+  office: body.office,
+  counsellingHours: body.counsellingHours,
+  phoneNumber: body.phoneNumber,
+  bio: body.bio,
+  specialization: parseArrayField(body.specialization),
+  yearsOfExperience:
+    body.yearsOfExperience === "" || body.yearsOfExperience === undefined
+      ? undefined
+      : Number(body.yearsOfExperience),
+});
 
 // Get all staff with pagination and search
 const getAllStaff = async (req, res) => {
@@ -15,11 +52,12 @@ const getAllStaff = async (req, res) => {
     let query = {};
 
     if (search) {
+      const safeSearch = escapeRegExp(search);
       query.$or = [
-        { name: { $regex: search, $options: "i" } },
-        { department: { $regex: search, $options: "i" } },
-        { courses: { $regex: search, $options: "i" } },
-        { qualification: { $regex: search, $options: "i" } },
+        { name: { $regex: safeSearch, $options: "i" } },
+        { department: { $regex: safeSearch, $options: "i" } },
+        { courses: { $regex: safeSearch, $options: "i" } },
+        { qualification: { $regex: safeSearch, $options: "i" } },
       ];
     }
 
@@ -46,11 +84,7 @@ const getAllStaff = async (req, res) => {
       },
     });
   } catch (error) {
-    res.status(500).json({
-      success: false,
-      message: "Error fetching staff",
-      error: error.message,
-    });
+    sendServerError(res, "Error fetching staff", error);
   }
 };
 
@@ -71,26 +105,33 @@ const getStaffById = async (req, res) => {
       data: staff,
     });
   } catch (error) {
-    res.status(500).json({
-      success: false,
-      message: "Error fetching staff member",
-      error: error.message,
-    });
+    sendServerError(res, "Error fetching staff member", error);
   }
 };
 
 // Create new staff member
 const createStaff = async (req, res) => {
+  let uploadedImage;
+
   try {
-    const staffData = req.body;
+    const staffData = buildStaffData(req.body);
 
     const existingStaff = await Staff.findOne({ email: staffData.email });
-
     if (existingStaff) {
       return res.status(400).json({
         success: false,
         message: "A staff member with this email already exists",
       });
+    }
+
+    if (req.file) {
+      uploadedImage = await uploadStaffImage(
+        req.file.buffer,
+        req.file.originalname,
+        req.file.mimetype
+      );
+      if (!uploadedImage.success) throw new Error(uploadedImage.error);
+      staffData.image = uploadedImage.imageUrl;
     }
 
     const staff = await Staff.create(staffData);
@@ -101,6 +142,10 @@ const createStaff = async (req, res) => {
       data: staff,
     });
   } catch (error) {
+    if (uploadedImage?.storagePath) {
+      await deleteStaffImage(uploadedImage.storagePath);
+    }
+
     if (error.code === 11000) {
       return res.status(400).json({
         success: false,
@@ -108,27 +153,42 @@ const createStaff = async (req, res) => {
       });
     }
 
-    res.status(500).json({
-      success: false,
-      message: "Error creating staff member",
-      error: error.message,
-    });
+    sendServerError(res, "Error creating staff member", error);
   }
 };
 
 // Update staff member
 const updateStaff = async (req, res) => {
-  try {
-    const staff = await Staff.findByIdAndUpdate(req.params.id, req.body, {
-      new: true,
-      runValidators: true,
-    });
+  let uploadedImage;
 
-    if (!staff) {
+  try {
+    const existingStaff = await Staff.findById(req.params.id);
+    if (!existingStaff) {
       return res.status(404).json({
         success: false,
         message: "Staff member not found",
       });
+    }
+
+    const staffData = buildStaffData(req.body);
+    if (req.file) {
+      uploadedImage = await uploadStaffImage(
+        req.file.buffer,
+        req.file.originalname,
+        req.file.mimetype
+      );
+      if (!uploadedImage.success) throw new Error(uploadedImage.error);
+      staffData.image = uploadedImage.imageUrl;
+    }
+
+    const staff = await Staff.findByIdAndUpdate(req.params.id, staffData, {
+      new: true,
+      runValidators: true,
+    });
+
+    if (uploadedImage?.storagePath && existingStaff.image) {
+      const previousPath = extractStaffImagePath(existingStaff.image);
+      if (previousPath) await deleteStaffImage(previousPath);
     }
 
     res.status(200).json({
@@ -137,11 +197,18 @@ const updateStaff = async (req, res) => {
       data: staff,
     });
   } catch (error) {
-    res.status(500).json({
-      success: false,
-      message: "Error updating staff member",
-      error: error.message,
-    });
+    if (uploadedImage?.storagePath) {
+      await deleteStaffImage(uploadedImage.storagePath);
+    }
+
+    if (error.code === 11000) {
+      return res.status(400).json({
+        success: false,
+        message: "A staff member with this email already exists",
+      });
+    }
+
+    sendServerError(res, "Error updating staff member", error);
   }
 };
 
@@ -157,16 +224,14 @@ const deleteStaff = async (req, res) => {
       });
     }
 
-    if (staff.image && staff.image.includes("supabase.co")) {
-      try {
-        const url = new URL(staff.image);
-        const pathParts = url.pathname.split("/staff-profiles/");
-        if (pathParts.length > 1) {
-          const storagePath = `staff-profiles/${pathParts[1]}`;
-          await deleteStaffImage(storagePath);
-        }
-      } catch (cloudError) {
-        // Continue with database deletion even if cloud delete fails
+    const imagePath = extractStaffImagePath(staff.image);
+    if (imagePath) {
+      const storageResult = await deleteStaffImage(imagePath);
+      if (!storageResult.success) {
+        return res.status(502).json({
+          success: false,
+          message: "Image cleanup failed; the staff member was not deleted",
+        });
       }
     }
 
@@ -177,29 +242,19 @@ const deleteStaff = async (req, res) => {
       message: "Staff member permanently deleted",
     });
   } catch (error) {
-    res.status(500).json({
-      success: false,
-      message: "Failed to delete staff member",
-      error: error.message,
-    });
+    sendServerError(res, "Failed to delete staff member", error);
   }
 };
 
 // Get all departments
 const getDepartments = async (req, res) => {
   try {
-    const departments = await Staff.distinct("department");
-
     res.status(200).json({
       success: true,
-      data: departments,
+      data: DEPARTMENTS,
     });
   } catch (error) {
-    res.status(500).json({
-      success: false,
-      message: "Error fetching departments",
-      error: error.message,
-    });
+    sendServerError(res, "Error fetching departments", error);
   }
 };
 
