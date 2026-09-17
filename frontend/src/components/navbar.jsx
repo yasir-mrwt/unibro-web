@@ -12,13 +12,14 @@ import {
   X,
 } from "lucide-react";
 import { useTheme } from "./ThemeContext";
+import Brand from "./Brand";
 import LoginForm from "./authentication/loginForm";
 import RegisterForm from "./authentication/registerForm";
 import { getStoredUser, logout } from "../services/authService";
 
 const baseLinks = [
   ["Dashboard", "/dashboard"],
-  ["Resources", "/select-department"],
+  ["Resources", "/resources"],
   ["Community", "/community"],
   ["Staff", "/staff"],
   ["My uploads", "/my-posts"],
@@ -53,6 +54,7 @@ export default function Navbar() {
   }, [location.pathname]);
   useEffect(() => {
     if (location.state?.showLogin) setAuthView("login");
+    if (location.state?.showRegister) setAuthView("register");
   }, [location.state]);
   useEffect(() => {
     const close = (event) => {
@@ -83,29 +85,40 @@ export default function Navbar() {
       <header className="site-header">
         <div className="container site-header-inner">
           <Link to="/" className="brand" aria-label="UniBro home">
-            <span className="brand-mark">UB</span>
-            <span>UniBro</span>
+            <Brand />
           </Link>
           <nav className="primary-nav" aria-label="Primary navigation">
-            {navLinks.map(([label, path]) => (
-              <NavLink
-                key={path}
-                to={path}
-                className={({ isActive }) =>
-                  `nav-link${isActive ? " active" : ""}`
-                }
-              >
-                {label}
-              </NavLink>
-            ))}
+            {user
+              ? navLinks.map(([label, path]) => (
+                  <NavLink
+                    key={path}
+                    to={path}
+                    className={({ isActive }) =>
+                      `nav-link${isActive ? " active" : ""}`
+                    }
+                  >
+                    {label}
+                  </NavLink>
+                ))
+              : [
+                  ["How it works", "how-it-works"],
+                  ["What you get", "what-you-get"],
+                  ["About", "why-unibro"],
+                ].map(([label, anchor]) => (
+                  <a className="nav-link" href={`/#${anchor}`} key={anchor}>
+                    {label}
+                  </a>
+                ))}
           </nav>
           <div className="header-actions">
-            <Link
-              className="btn btn-primary btn-sm header-upload"
-              to="/upload-modal"
-            >
-              <BookUp size={16} /> Upload
-            </Link>
+            {user && (
+              <Link
+                className="btn btn-primary btn-sm header-upload"
+                to="/upload-modal"
+              >
+                <BookUp size={16} /> Upload
+              </Link>
+            )}
             <button
               className="btn btn-ghost btn-icon"
               onClick={toggleDarkMode}
@@ -146,12 +159,10 @@ export default function Navbar() {
                 )}
               </div>
             ) : (
-              <button
-                className="btn btn-secondary btn-sm"
-                onClick={() => setAuthView("login")}
-              >
-                Sign in
-              </button>
+              <>
+                <button className="btn btn-ghost btn-sm public-sign-in" onClick={() => setAuthView("login")}>Sign in</button>
+                <button className="btn btn-primary btn-sm public-get-started" onClick={() => setAuthView("register")}>Get started</button>
+              </>
             )}
             <button
               className="btn btn-ghost btn-icon mobile-menu-button"
@@ -166,20 +177,19 @@ export default function Navbar() {
       </header>
       {mobileOpen && (
         <nav className="mobile-nav" aria-label="Mobile navigation">
-          {navLinks.map(([label, path]) => (
-            <NavLink
-              key={path}
-              to={path}
-              className={({ isActive }) =>
-                `nav-link${isActive ? " active" : ""}`
-              }
-            >
-              {label}
-            </NavLink>
-          ))}
-          <Link className="nav-link" to="/upload-modal">
-            Upload resource
-          </Link>
+          {user ? (
+            <>
+              {navLinks.map(([label, path]) => <NavLink key={path} to={path} className="nav-link">{label}</NavLink>)}
+              <Link className="nav-link" to="/upload-modal">Upload resource</Link>
+            </>
+          ) : (
+            <>
+              <a className="nav-link" href="/#how-it-works">How it works</a>
+              <a className="nav-link" href="/#what-you-get">What you get</a>
+              <a className="nav-link" href="/#why-unibro">About</a>
+              <button className="btn btn-primary" onClick={() => setAuthView("register")}>Get started</button>
+            </>
+          )}
         </nav>
       )}
       <LoginForm

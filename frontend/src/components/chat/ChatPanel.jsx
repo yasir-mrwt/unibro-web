@@ -17,7 +17,7 @@ export default function ChatPanel({ department, semester }) {
   const [typing, setTyping] = useState("");
   const [text, setText] = useState("");
   const [reply, setReply] = useState(null);
-  const bottom = useRef(null);
+  const log = useRef(null);
   const timer = useRef(null);
   const typingTimer = useRef(null);
   const connectedOnce = useRef(false);
@@ -87,10 +87,12 @@ export default function ChatPanel({ department, semester }) {
       connectedOnce.current = false;
     };
   }, [name, semester, load]);
-  useEffect(
-    () => bottom.current?.scrollIntoView({ behavior: "smooth" }),
-    [messages],
-  );
+  useEffect(() => {
+    log.current?.scrollTo({
+      top: log.current.scrollHeight,
+      behavior: "smooth",
+    });
+  }, [messages]);
   const change = (e) => {
     setText(e.target.value);
     if (!user?.isVerified) return;
@@ -135,7 +137,7 @@ export default function ChatPanel({ department, semester }) {
           </button>
         </div>
       )}
-      <div className="chat-log" aria-live="polite">
+      <div className="chat-log" aria-live="polite" ref={log}>
         {loading ? (
           <LoadingState rows={4} />
         ) : messages.length ? (
@@ -156,7 +158,6 @@ export default function ChatPanel({ department, semester }) {
             </div>
           </div>
         )}
-        <div ref={bottom} />
       </div>
       {typing && <div className="chat-typing">{typing} is typing…</div>}
       {reply && (

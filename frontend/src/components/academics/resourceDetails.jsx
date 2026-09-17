@@ -27,6 +27,15 @@ const readContext = () => {
   }
 };
 const flatten = (groups = {}) => Object.values(groups).flat();
+const resourceTypes = [
+  "All",
+  "Notes",
+  "Assignments",
+  "Past Papers",
+  "Projects",
+  "Presentations",
+  "Quizzes",
+];
 const fileKind = (type = "") => type.split("/").pop()?.toUpperCase() || "FILE";
 const date = (value) =>
   new Intl.DateTimeFormat(undefined, { dateStyle: "medium" }).format(
@@ -38,7 +47,7 @@ export default function ResourceDetails() {
   const navigate = useNavigate();
   const { notify } = useToast();
   const saved = readContext();
-  const resourceType =
+  const initialResourceType =
     location.state?.resourceType ||
     localStorage.getItem("currentResourceType") ||
     "All";
@@ -46,6 +55,7 @@ export default function ResourceDetails() {
   const semester = location.state?.semester || saved.semester;
   const departmentName = department?.name || department || "";
   const [query, setQuery] = useState("");
+  const [resourceType, setResourceType] = useState(initialResourceType);
   const [year, setYear] = useState("All");
   const [sort, setSort] = useState("recent");
   const [selected, setSelected] = useState(null);
@@ -58,7 +68,7 @@ export default function ResourceDetails() {
     setState((current) => ({ ...current, loading: true, error: "" }));
     try {
       const data = await getResources({
-        resourceType,
+        ...(resourceType !== "All" && { resourceType }),
         department: departmentName,
         semester,
         ...(query && { search: query }),
@@ -149,10 +159,12 @@ export default function ResourceDetails() {
           >
             <ArrowLeft size={16} /> Dashboard
           </button>
-          <h1 className="page-title">{resourceType}</h1>
+          <span className="eyebrow">Your semester library</span>
+          <h1 className="page-title">Resources</h1>
           <div className="context-pills">
             <span className="badge badge-brand">{departmentName}</span>
             <span className="badge">Semester {semester}</span>
+            <span className="badge">{resourceType}</span>
             <span className="badge">{state.items.length} resources</span>
           </div>
         </div>
@@ -175,13 +187,24 @@ export default function ResourceDetails() {
           </button>
         </div>
       </div>
+      <div className="tabs resource-category-tabs" aria-label="Resource categories">
+        {resourceTypes.map((type) => (
+          <button
+            className={`tab${resourceType === type ? " active" : ""}`}
+            key={type}
+            onClick={() => setResourceType(type)}
+          >
+            {type}
+          </button>
+        ))}
+      </div>
       <div className="toolbar">
         <div className="input-wrap">
           <Search />
           <input
             className="input"
             type="search"
-            placeholder={`Search ${resourceType.toLowerCase()}`}
+          placeholder={`Search ${resourceType === "All" ? "resources" : resourceType.toLowerCase()}`}
             value={query}
             onChange={(event) => setQuery(event.target.value)}
             aria-label="Search resources"

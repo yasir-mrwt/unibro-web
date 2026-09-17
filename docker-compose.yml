@@ -9,6 +9,7 @@ services:
       NODE_ENV: production
       PORT: 5001
       FRONTEND_URL: http://localhost:8080
+      CORS_ORIGINS: ${CORS_ORIGINS:-http://localhost:5173,http://127.0.0.1:5173}
     ports:
       - "${BACKEND_PORT:-5001}:5001"
     healthcheck:

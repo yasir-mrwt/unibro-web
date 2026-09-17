@@ -2,6 +2,7 @@ import React, { useEffect, useRef, useState } from "react";
 import { AlertCircle, Eye, EyeOff, X } from "lucide-react";
 import { login, loginWithGoogle } from "../../services/authService";
 import ForgotPasswordModal from "./ForgotPasswordModal";
+import Brand from "../Brand";
 
 export default function LoginForm({
   isOpen,
@@ -50,22 +51,25 @@ export default function LoginForm({
         onMouseDown={(e) => e.target === e.currentTarget && onClose()}
       >
         <div
-          className="dialog"
+          className="dialog auth-dialog"
           role="dialog"
           aria-modal="true"
           aria-labelledby="login-title"
         >
           <div className="dialog-head">
-            <div>
-              <span className="eyebrow">Welcome back</span>
-              <h2
-                className="section-title"
-                id="login-title"
-                ref={headingRef}
-                tabIndex="-1"
-              >
-                Sign in to UniBro
-              </h2>
+            <div className="auth-heading">
+              <Brand />
+              <div>
+                <span className="eyebrow">Welcome back</span>
+                <h2
+                  className="section-title"
+                  id="login-title"
+                  ref={headingRef}
+                  tabIndex="-1"
+                >
+                  Sign in to UniBro
+                </h2>
+              </div>
             </div>
             <button
               className="btn btn-ghost btn-icon"

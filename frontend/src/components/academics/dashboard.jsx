@@ -1,4 +1,4 @@
-import React, { useCallback, useEffect, useState } from "react";
+import React, { useCallback, useEffect, useMemo, useState } from "react";
 import { useLocation, useNavigate } from "react-router-dom";
 import {
   BookMarked,
@@ -13,6 +13,8 @@ import {
   UploadCloud,
 } from "lucide-react";
 import { API_URL } from "../../services/config";
+import { getStoredUser } from "../../services/authService";
+import { getResources } from "../../services/resourceService";
 import { ErrorState, LoadingState } from "../ui/States";
 
 const types = [
@@ -34,34 +36,48 @@ const storedContext = () => {
 export default function Dashboard() {
   const location = useLocation();
   const navigate = useNavigate();
-  const context =
-    location.state?.department && location.state?.semester
-      ? location.state
-      : storedContext();
-  const [state, setState] = useState({ loading: true, error: "", counts: {} });
+  const context = useMemo(
+    () =>
+      location.state?.department && location.state?.semester
+        ? location.state
+        : storedContext(),
+    [location.state],
+  );
+  const user = getStoredUser();
+  const [state, setState] = useState({
+    loading: true,
+    error: "",
+    counts: {},
+    recent: [],
+  });
   useEffect(() => {
     if (location.state?.department && location.state?.semester)
       localStorage.setItem("dashboardData", JSON.stringify(location.state));
   }, [location.state]);
   const load = useCallback(async () => {
     if (!context) {
-      setState({ loading: false, error: "", counts: {} });
+      setState({ loading: false, error: "", counts: {}, recent: [] });
       return;
     }
     setState((current) => ({ ...current, loading: true, error: "" }));
     try {
       const department = context.department?.name || context.department;
-      const response = await fetch(
-        `${API_URL}/api/resources/counts?department=${encodeURIComponent(department)}&semester=${encodeURIComponent(context.semester)}`,
-      );
+      const [response, resourceData] = await Promise.all([
+        fetch(`${API_URL}/api/resources/counts?department=${encodeURIComponent(department)}&semester=${encodeURIComponent(context.semester)}`),
+        getResources({ department, semester: context.semester }),
+      ]);
       const data = await response.json();
       if (!response.ok)
         throw new Error(data.message || "Unable to load resource counts");
-      setState({ loading: false, error: "", counts: data.counts || {} });
+      const recent = Object.values(resourceData.resources || {})
+        .flat()
+        .sort((a, b) => new Date(b.createdAt) - new Date(a.createdAt))
+        .slice(0, 4);
+      setState({ loading: false, error: "", counts: data.counts || {}, recent });
     } catch (error) {
-      setState({ loading: false, error: error.message, counts: {} });
+      setState({ loading: false, error: error.message, counts: {}, recent: [] });
     }
-  }, [context?.department, context?.semester]); // eslint-disable-line react-hooks/exhaustive-deps
+  }, [context]);
   useEffect(() => {
     load();
   }, [load]);
@@ -85,13 +101,15 @@ export default function Dashboard() {
     );
   const departmentName = context.department?.name || context.department;
   const open = (resourceType) =>
-    navigate("/resource-details", { state: { ...context, resourceType } });
+    navigate("/resources", { state: { ...context, resourceType } });
   return (
     <div className="container page stack">
       <section className="workspace-head">
         <div>
-          <span className="eyebrow">Student workspace</span>
-          <h1 className="page-title">Ready for semester {context.semester}?</h1>
+          <span className="eyebrow">Semester overview</span>
+          <h1 className="page-title">
+            {user?.fullName?.split(" ")[0] ? `Welcome back, ${user.fullName.split(" ")[0]}.` : "Welcome back."}
+          </h1>
           <div className="context-pills">
             <span className="badge badge-brand">{departmentName}</span>
             <span className="badge">Semester {context.semester}</span>
@@ -112,10 +130,17 @@ export default function Dashboard() {
           </button>
         </div>
       </section>
+      <button
+        className="dashboard-search-entry"
+        onClick={() => navigate("/resources", { state: context })}
+      >
+        <span><FileText size={19} /> Search notes, assignments, papers, and projects</span>
+        <span>Open library <span aria-hidden="true">→</span></span>
+      </button>
       <section>
         <div className="page-header">
           <div>
-            <h2 className="section-title">Browse your library</h2>
+            <h2 className="section-title">Browse by resource type</h2>
             <p className="page-copy">
               Open a category to search, preview, and download approved
               resources.
@@ -147,6 +172,23 @@ export default function Dashboard() {
           </div>
         )}
       </section>
+      {!state.loading && !state.error && state.recent.length > 0 && (
+        <section className="dashboard-recent">
+          <div className="page-header">
+            <div><span className="eyebrow">Recently added</span><h2 className="section-title">New in your semester</h2></div>
+            <button className="btn btn-ghost" onClick={() => navigate("/resources", { state: context })}>View all</button>
+          </div>
+          <div className="resource-list">
+            {state.recent.map((resource) => (
+              <button className="resource-row dashboard-resource-row" key={resource._id} onClick={() => navigate("/resources", { state: { ...context, resourceType: resource.resourceType, selectedResourceId: resource._id } })}>
+                <span className="icon-box"><FileText size={19} /></span>
+                <span><strong>{resource.title}</strong><span className="resource-meta">{resource.courseName} · {resource.resourceType}</span></span>
+                <span aria-hidden="true">→</span>
+              </button>
+            ))}
+          </div>
+        </section>
+      )}
       <section className="feature-grid">
         <article className="card card-pad">
           <span className="icon-box accent">
