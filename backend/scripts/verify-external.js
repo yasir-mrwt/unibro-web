@@ -22,9 +22,15 @@ const requireValues = (names) => {
 
 const checkMongo = async () => {
   requireValues(["MONGO_URI"]);
-  const host = new URL(process.env.MONGO_URI.replace("mongodb+srv:", "https:"))
-    .hostname;
-  await dns.resolve(host);
+  const usesSrv = process.env.MONGO_URI.startsWith("mongodb+srv://");
+  const host = new URL(
+    process.env.MONGO_URI.replace(usesSrv ? "mongodb+srv:" : "mongodb:", "https:"),
+  ).hostname;
+  if (usesSrv) {
+    await dns.resolveSrv(`_mongodb._tcp.${host}`);
+  } else {
+    await dns.lookup(host);
+  }
   const client = new MongoClient(process.env.MONGO_URI, {
     serverSelectionTimeoutMS: 10_000,
   });

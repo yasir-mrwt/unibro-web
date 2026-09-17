@@ -1,6 +1,7 @@
 import React, { useEffect, useRef, useState } from "react";
 import { AlertCircle, CheckCircle2, Eye, EyeOff, X } from "lucide-react";
 import { register } from "../../services/authService";
+import Brand from "../Brand";
 
 const passwordError = (value) => {
   if (value.length < 8) return "Use at least 8 characters.";
@@ -77,22 +78,25 @@ export default function RegisterForm({
       onMouseDown={(e) => e.target === e.currentTarget && onClose()}
     >
       <div
-        className="dialog"
+        className="dialog auth-dialog"
         role="dialog"
         aria-modal="true"
         aria-labelledby="register-title"
       >
         <div className="dialog-head">
-          <div>
-            <span className="eyebrow">Join your campus</span>
-            <h2
-              className="section-title"
-              id="register-title"
-              tabIndex="-1"
-              ref={titleRef}
-            >
-              Create an account
-            </h2>
+          <div className="auth-heading">
+            <Brand />
+            <div>
+              <span className="eyebrow">Join your campus</span>
+              <h2
+                className="section-title"
+                id="register-title"
+                tabIndex="-1"
+                ref={titleRef}
+              >
+                Create an account
+              </h2>
+            </div>
           </div>
           <button
             className="btn btn-ghost btn-icon"

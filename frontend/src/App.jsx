@@ -4,6 +4,7 @@ import { ThemeProvider } from "./components/ThemeContext";
 import { ToastProvider } from "./components/ui/ToastContext";
 import { LoadingState } from "./components/ui/States";
 import Navbar from "./components/navbar";
+import { getStoredUser, isAuthenticated } from "./services/authService";
 
 const Home = lazy(() => import("./pages/Home"));
 const DepartmentSelection = lazy(
@@ -31,6 +32,15 @@ const AuthSuccess = lazy(() => import("./pages/AuthSuccess"));
 const AuthError = lazy(() => import("./pages/AuthError"));
 const NotFound = lazy(() => import("./pages/NotFound"));
 
+function ProtectedRoute({ children, admin = false }) {
+  const user = getStoredUser();
+  if (!isAuthenticated())
+    return <Navigate to="/" replace state={{ showLogin: true }} />;
+  if (admin && user.role !== "admin")
+    return <Navigate to="/dashboard" replace />;
+  return children;
+}
+
 export default function App() {
   const handleOAuthLoginSuccess = (user) => {
     window.dispatchEvent(new CustomEvent("userLoggedIn", { detail: user }));
@@ -54,20 +64,47 @@ export default function App() {
                   <Route path="/" element={<Home />} />
                   <Route
                     path="/select-department"
-                    element={<DepartmentSelection />}
+                    element={
+                      <ProtectedRoute>
+                        <DepartmentSelection />
+                      </ProtectedRoute>
+                    }
                   />
                   <Route
                     path="/select-semester"
-                    element={<SemesterSelection />}
+                    element={
+                      <ProtectedRoute>
+                        <SemesterSelection />
+                      </ProtectedRoute>
+                    }
                   />
-                  <Route path="/dashboard" element={<Dashboard />} />
+                  <Route
+                    path="/dashboard"
+                    element={
+                      <ProtectedRoute>
+                        <Dashboard />
+                      </ProtectedRoute>
+                    }
+                  />
+                  <Route
+                    path="/resources"
+                    element={
+                      <ProtectedRoute>
+                        <ResourceDetails />
+                      </ProtectedRoute>
+                    }
+                  />
                   <Route
                     path="/resource-details"
-                    element={<ResourceDetails />}
+                    element={
+                      <ProtectedRoute>
+                        <ResourceDetails />
+                      </ProtectedRoute>
+                    }
                   />
-                  <Route path="/upload-modal" element={<UploadModal />} />
-                  <Route path="/community" element={<Community />} />
-                  <Route path="/staff" element={<StaffDirectory />} />
+                  <Route path="/upload-modal" element={<ProtectedRoute><UploadModal /></ProtectedRoute>} />
+                  <Route path="/community" element={<ProtectedRoute><Community /></ProtectedRoute>} />
+                  <Route path="/staff" element={<ProtectedRoute><StaffDirectory /></ProtectedRoute>} />
                   <Route path="/about" element={<AboutPage />} />
                   <Route
                     path="/verify-email/:token"
@@ -79,7 +116,7 @@ export default function App() {
                   />
                   <Route
                     path="/profile-settings"
-                    element={<ProfileSettings />}
+                    element={<ProtectedRoute><ProfileSettings /></ProtectedRoute>}
                   />
                   <Route
                     path="/auth/success"
@@ -94,8 +131,8 @@ export default function App() {
                       <Navigate to="/" replace state={{ showLogin: true }} />
                     }
                   />
-                  <Route path="/my-posts" element={<MyPosts />} />
-                  <Route path="/admin/dashboard" element={<AdminDashboard />} />
+                  <Route path="/my-posts" element={<ProtectedRoute><MyPosts /></ProtectedRoute>} />
+                  <Route path="/admin/dashboard" element={<ProtectedRoute admin><AdminDashboard /></ProtectedRoute>} />
                   <Route path="*" element={<NotFound />} />
                 </Routes>
               </Suspense>

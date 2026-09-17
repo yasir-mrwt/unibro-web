@@ -1,174 +1,175 @@
 # UniBro
 
-UniBro is a full-stack digital campus workspace for finding and sharing academic resources, connecting with a semester community, and locating faculty information. It combines a focused student interface with moderated uploads and role-based administration.
+UniBro is a digital campus workspace organized around a student's department and semester. Students can find approved notes, assignments, past papers, projects, presentations, and quizzes; contribute resources for moderation; join their authenticated academic community; and browse faculty information.
 
-## Overview
+## Product areas
 
-Students select a department and semester, browse approved notes and coursework, preview or download files, contribute their own material, and join an authenticated real-time room. Staff records and resource submissions are managed through the same product design system.
+- Public, brand-led product site with focused sign-in and registration flows
+- Department and semester onboarding before entering the student application
+- Overview dashboard with resource shortcuts, recent material, uploads, and community entry points
+- Dedicated resource discovery with search, categories, year filters, sorting, preview, and download
+- Moderated resource uploads and personal submission status
+- JWT-authenticated Socket.IO rooms with typing, shared Mongo-backed presence, reconnect/rejoin, and authorized deletion
+- Searchable staff directory, profile/security settings, and role-protected administration
 
-## Features
+## Stack and architecture
 
-- Local accounts, Google OAuth, email verification, and password recovery
-- Department- and semester-aware resource discovery
-- Search, category and year filters, sorting, previews, and downloads
-- Authenticated uploads with server-side validation and moderation
-- Personal upload history with pending, approved, and rejected states
-- JWT-authenticated Socket.IO community rooms with typing and presence
-- Searchable faculty/staff directory
-- Profile, email, password, and verification management
-- Resource moderation, user visibility, and staff administration
-- Responsive light/dark interface with keyboard and reduced-motion support
-
-## Main Workflows
-
-1. Select a department and semester to create a persistent study context.
-2. Browse a resource category, search results, and open the inline preview.
-3. Sign in and verify an email address to upload or participate in chat.
-4. Track uploads in **My uploads** while an administrator reviews them.
-5. Use **Community** for the authenticated room matching the current context.
-
-## Tech Stack
-
-### Frontend
-
-React 19, Vite, React Router, Tailwind CSS, Lucide icons, and Socket.IO Client.
-
-### Backend
-
-Node.js 20+, Express 5, Mongoose, JWT, Passport Google OAuth, Socket.IO, Helmet, rate limiting, Multer, and express-validator.
-
-### Services
-
-- MongoDB Atlas for application data
-- Supabase Storage for resource files and optional staff images
-- Mailjet for verification, password, and moderation email
-- Google OAuth for federated sign-in
-
-## Architecture
+- **Frontend:** React 19, Vite, React Router, Socket.IO Client, local open-source Fraunces and Manrope fonts
+- **Backend:** Node.js 22+ (containers and CI use Node 24), Express 5, Mongoose, Socket.IO, Passport, JWT, Helmet, rate limiting, and Multer
+- **Services:** MongoDB Atlas, Supabase Storage, Mailjet, and Google OAuth
+- **Deployment:** separate frontend and backend Vercel projects; Docker images and Docker Compose are also maintained
 
 ```text
-Browser (React/Vite on Vercel)
-           │ REST + authenticated Socket.IO
-           ▼
-Express/Socket.IO API (Render)
-     ├── MongoDB Atlas
-     ├── Supabase Storage
-     ├── Mailjet
-     └── Google OAuth
+Browser — https://unibro-frontend-one.vercel.app
+   │ REST + authenticated Socket.IO
+   ▼
+API — https://unibro-backend.vercel.app
+   ├── MongoDB Atlas (data, Socket.IO adapter, shared presence)
+   ├── Supabase Storage
+   ├── Mailjet
+   └── Google OAuth
 ```
 
-The browser receives only the public backend origin. Storage service credentials and all other secrets remain on the backend.
+Only `VITE_API_URL` is exposed to the browser. Database, storage service-role, OAuth, email, and JWT secrets stay in the backend environment.
 
-## Repository Structure
+## Repository layout
 
 ```text
-frontend/   React SPA, Vercel routing, sitemap, and robots handlers
-backend/    Express API, Socket.IO server, data models, and tests
-render.yaml Reproducible Render web-service configuration
+frontend/             React SPA, Vercel routes, and visual review
+backend/              Express/Socket.IO service and integration tests
+.github/workflows/    lint, test, build, audit, and Docker CI
+docker-compose.yml    local production-style stack
 ```
 
-## Local Development
+## Local development
 
-### Prerequisites
-
-- Node.js 20 or newer
-- npm
-- Access to the existing MongoDB, Supabase, Mailjet, and Google projects
-
-Install dependencies and create local environment files:
+Requirements: Node.js 22.12 or newer, npm, and access to the configured service projects.
 
 ```bash
 cd backend
-npm install
+npm ci
 cp .env.example .env
 
 cd ../frontend
-npm install
+npm ci
 cp .env.example .env
 ```
 
-Complete both `.env` files, then run the apps in separate terminals:
+Complete both environment files, then run each app in its own terminal:
 
 ```bash
 cd backend && npm run dev
 cd frontend && npm run dev
 ```
 
-The default local origins are `http://localhost:5001` for the API and `http://localhost:5173` for the frontend.
+The defaults are `http://localhost:5001` for the API and `http://localhost:5173` for Vite.
 
-## Environment Variables
+## Environment
 
-### `frontend/.env`
+### Frontend
 
-| Variable       | Purpose                                                                  |
-| -------------- | ------------------------------------------------------------------------ |
-| `VITE_API_URL` | Absolute public origin of the Express API; no trailing path is required. |
+| Variable | Required value/purpose |
+| --- | --- |
+| `VITE_API_URL` | Absolute public backend origin. Production: `https://unibro-backend.vercel.app` |
 
-`VITE_` values are public browser configuration and must never contain secrets.
+All `VITE_` values are public. Never place secrets in them.
 
-### `backend/.env`
+### Backend
 
-| Variable               | Purpose                                                           |
-| ---------------------- | ----------------------------------------------------------------- |
-| `PORT`                 | Local/server port; Render supplies this automatically.            |
-| `NODE_ENV`             | `development`, `test`, or `production`.                           |
-| `FRONTEND_URL`         | Exact frontend origin allowed by REST and Socket.IO CORS.         |
-| `MONGO_URI`            | Existing MongoDB Atlas connection string.                         |
-| `JWT_SECRET`           | Strong signing secret; at least 32 characters in production.      |
-| `JWT_EXPIRE`           | JWT lifetime, for example `7d`.                                   |
-| `GOOGLE_CLIENT_ID`     | Google OAuth client ID.                                           |
-| `GOOGLE_CLIENT_SECRET` | Google OAuth client secret.                                       |
-| `GOOGLE_CALLBACK_URL`  | Absolute backend callback ending in `/api/auth/google/callback`.  |
-| `MAILJET_API_KEY`      | Mailjet API key.                                                  |
-| `MAILJET_SECRET_KEY`   | Mailjet secret key.                                               |
-| `MAILJET_SENDER_EMAIL` | Verified Mailjet sender address.                                  |
-| `MAILJET_SENDER_NAME`  | Optional sender display name.                                     |
-| `SUPABASE_URL`         | Existing Supabase project URL.                                    |
-| `SUPABASE_SERVICE_KEY` | Backend-only Supabase service-role key.                           |
-| `SUPABASE_BUCKET`      | Public storage bucket name; the expected value is `unibro-files`. |
+| Variable | Purpose |
+| --- | --- |
+| `NODE_ENV` | `development`, `test`, or `production` |
+| `PORT` | HTTP port; defaults to `5001` locally |
+| `FRONTEND_URL` | Primary exact browser origin. Production: `https://unibro-frontend-one.vercel.app` |
+| `CORS_ORIGINS` | Optional comma-separated additional exact origins, such as stable preview aliases |
+| `MONGO_URI` | MongoDB connection string |
+| `JWT_SECRET` | Signing secret; at least 32 characters in production |
+| `JWT_EXPIRE` | Token lifetime, for example `7d` |
+| `GOOGLE_CLIENT_ID` | Google OAuth client ID |
+| `GOOGLE_CLIENT_SECRET` | Google OAuth client secret |
+| `GOOGLE_CALLBACK_URL` | Production: `https://unibro-backend.vercel.app/api/auth/google/callback` |
+| `MAILJET_API_KEY` | Mailjet API key |
+| `MAILJET_SECRET_KEY` | Mailjet secret key |
+| `MAILJET_SENDER_EMAIL` | Active verified sender |
+| `MAILJET_SENDER_NAME` | Optional sender label; defaults to `UniBro` |
+| `SUPABASE_URL` | Supabase project URL |
+| `SUPABASE_SERVICE_KEY` | Backend-only service-role key |
+| `SUPABASE_BUCKET` | Public resource bucket; normally `unibro-files` |
 
-Production startup validates every integration variable without printing its value.
+Origins are trimmed and normalized to their URL origin. The API uses an exact allowlist—never a wildcard—and the same source configures Express and Socket.IO. `FRONTEND_URLS` remains accepted only as a compatibility alias; new deployments should use `CORS_ORIGINS`.
 
-## Tests and Build
+## Verification
 
 ```bash
-cd backend
-npm test
-npm audit
-
-cd ../frontend
+cd frontend
 npm run lint
+npm test
 npm run build
-npm audit
+npm audit --audit-level=high
+
+cd ../backend
+npm run check
+npm test
+npm audit --audit-level=high
 ```
 
-Backend tests use an isolated in-memory MongoDB and mocked email/storage providers. They do not alter production data.
+With a frontend dev server running, `npm run test:visual` in `frontend` checks the key public and authenticated routes across desktop, tablet, and mobile viewports and writes review screenshots to `/tmp`.
 
-## Deployment Architecture
+`npm run test:external` in `backend` performs live provider checks, including a disposable Supabase upload/download/delete cycle. Run it only against the intended environment. Backend unit and integration tests use isolated or mocked providers and do not alter production data.
 
-### Frontend: Vercel
+## Docker
 
-Import the monorepo with **Root Directory** set to `frontend`. Use the Vite defaults (`npm run build`, output `dist`) and set `VITE_API_URL` to the Render API origin. `vercel.json` handles SPA refreshes plus dynamic sitemap and robots routes.
+Copy and complete the environment files first, then run:
 
-### Backend: Render
+```bash
+docker compose up --build
+```
 
-`render.yaml` defines a long-running Node web service with `backend` as its root, `npm ci` as the build command, `npm start` as the start command, and `/api/health` as its health check. Add the secret environment values in Render before the first deployment.
+The production-style frontend is served at `http://localhost:8080` and the backend at `http://localhost:5001`. Ports can be changed with `FRONTEND_PORT` and `BACKEND_PORT`; the frontend build target can be set with `VITE_API_URL`. `backend/Dockerfile.vercel` is the backend Vercel container entry.
 
-After both URLs are known:
+## Vercel deployment
 
-1. Set backend `FRONTEND_URL` to the exact Vercel production origin.
-2. Set frontend `VITE_API_URL` to the exact Render origin.
-3. Register the Render Google callback URL in Google Cloud and set `GOOGLE_CALLBACK_URL` to the same value.
-4. Confirm the Supabase bucket is public for read/preview access while write/delete access remains backend-only.
+Create two Vercel projects from this repository. Deployment itself is intentionally not performed by CI.
 
-## Security Notes
+### Frontend project
 
-- API and Socket.IO identity comes from bearer JWTs, never client-supplied user data.
-- Upload type and size rules are enforced on the server before storage.
-- Service-role, database, OAuth, email, and JWT secrets stay outside source control.
-- CORS uses an exact configured frontend origin in production.
-- Admin, verification, ownership, and room authorization are enforced server-side.
+- Root Directory: `frontend`
+- Framework: Vite
+- Build command: `npm run build`
+- Output directory: `dist`
+- Production variable: `VITE_API_URL=https://unibro-backend.vercel.app`
 
-## Project Status
+### Backend project
 
-The repository is prepared for Vercel + Render deployment, but deployment is intentionally not performed from this branch. A valid existing Supabase project URL and key are required before uploads and storage-backed deletions can pass live verification.
+- Root Directory: `backend`
+- Container entry: `Dockerfile.vercel`
+- Health endpoint: `/api/health`
+- Production variable: `FRONTEND_URL=https://unibro-frontend-one.vercel.app`
+- Optional preview allowlist: set `CORS_ORIGINS` only to the exact stable preview origins that should be trusted
+- Set every secret backend variable listed above for the **Production** environment, not only Preview
+- Register `https://unibro-backend.vercel.app/api/auth/google/callback` as an authorized Google OAuth redirect URI and use that same value for `GOOGLE_CALLBACK_URL`
+
+If `unibro-backend.vercel.app` returns Vercel's platform `NOT_FOUND` response, the request has not reached Express and CORS changes cannot repair it. Link the hostname to the correct backend project/Production deployment, confirm the backend Root Directory and container entry, then redeploy. Verify afterward:
+
+```bash
+curl -i https://unibro-backend.vercel.app/api/health
+
+curl -i -X OPTIONS \
+  https://unibro-backend.vercel.app/api/resources \
+  -H 'Origin: https://unibro-frontend-one.vercel.app' \
+  -H 'Access-Control-Request-Method: GET' \
+  -H 'Access-Control-Request-Headers: authorization,content-type'
+
+curl -i https://unibro-backend.vercel.app/api/resources \
+  -H 'Origin: https://unibro-frontend-one.vercel.app'
+```
+
+The preflight should return `204` with the exact frontend `Access-Control-Allow-Origin`, required methods and headers. Health and resources should return application responses, not a Vercel platform error.
+
+## Security boundaries
+
+- REST and Socket.IO identities come from signed bearer tokens, not client-provided user identities.
+- Route guards improve navigation, while backend authorization remains authoritative.
+- Upload size, MIME/type, ownership, verification, moderation, and admin rules are enforced server-side.
+- CORS permits only explicitly configured origins; non-browser requests without an Origin remain supported.
+- Supabase service-role, MongoDB, Mailjet, Google, and JWT secrets are excluded from source control.

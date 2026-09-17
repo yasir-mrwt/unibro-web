@@ -28,10 +28,12 @@ const validateEnvironment = () => {
     ["FRONTEND_URL", process.env.FRONTEND_URL],
     ["SUPABASE_URL", process.env.SUPABASE_URL],
     ["GOOGLE_CALLBACK_URL", process.env.GOOGLE_CALLBACK_URL],
-    ...String(process.env.FRONTEND_URLS || "")
-      .split(",")
-      .map((value, index) => [`FRONTEND_URLS[${index}]`, value.trim()])
-      .filter(([, value]) => value),
+    ...["CORS_ORIGINS", "FRONTEND_URLS"].flatMap((variable) =>
+      String(process.env[variable] || "")
+        .split(",")
+        .map((value, index) => [`${variable}[${index}]`, value.trim()])
+        .filter(([, value]) => value),
+    ),
   ];
   for (const [name, value] of urlVariables) {
     if (!value) continue;

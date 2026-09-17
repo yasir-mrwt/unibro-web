@@ -7,7 +7,7 @@
   "scripts": {
     "start": "node server.js",
     "dev": "nodemon server.js",
-    "check": "node --check server.js && node --check socket/chatSocket.js && node --check config/realtime.js",
+    "check": "node --check server.js && node --check config/cors.js && node --check socket/chatSocket.js && node --check config/realtime.js",
     "test": "node --test tests/*.test.js",
     "test:external": "node scripts/verify-external.js"
   },
@@ -45,6 +45,6 @@
     "socket.io-client": "^4.8.3"
   },
   "engines": {
-    "node": ">=20.19.0"
+    "node": ">=22.12.0"
   }
 }
