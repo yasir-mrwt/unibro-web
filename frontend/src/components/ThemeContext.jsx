@@ -1,4 +1,9 @@
-import React, { createContext, useContext, useState, useEffect } from "react";
+import React, {
+  createContext,
+  useContext,
+  useLayoutEffect,
+  useState,
+} from "react";
 
 /* eslint-disable react-refresh/only-export-components -- context and hook are intentionally colocated */
 
@@ -14,30 +19,24 @@ export const useTheme = () => {
 
 export const ThemeProvider = ({ children }) => {
   const [darkMode, setDarkMode] = useState(() => {
-    // Check localStorage first, then system preference
-    const saved = localStorage.getItem("darkMode");
-    if (saved !== null) {
-      return JSON.parse(saved);
+    try {
+      return localStorage.getItem("darkMode") === "true";
+    } catch {
+      return false;
     }
-    return window.matchMedia("(prefers-color-scheme: dark)").matches;
   });
 
-  useEffect(() => {
-    // Save to localStorage
-    localStorage.setItem("darkMode", JSON.stringify(darkMode));
-
-    // Apply class to document element
-    const root = document.documentElement;
-    if (darkMode) {
-      root.classList.add("dark");
-    } else {
-      root.classList.remove("dark");
+  useLayoutEffect(() => {
+    try {
+      localStorage.setItem("darkMode", String(darkMode));
+    } catch {
+      // The selected theme still works when storage is unavailable.
     }
+    const root = document.documentElement;
+    root.classList.toggle("dark", darkMode);
   }, [darkMode]);
 
-  const toggleDarkMode = () => {
-    setDarkMode(!darkMode);
-  };
+  const toggleDarkMode = () => setDarkMode((current) => !current);
 
   return (
     <ThemeContext.Provider value={{ darkMode, toggleDarkMode }}>
