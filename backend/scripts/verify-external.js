@@ -3,6 +3,8 @@ const dns = require("node:dns/promises");
 const crypto = require("node:crypto");
 const jwt = require("jsonwebtoken");
 const { MongoClient } = require("mongodb");
+const { Resend } = require("resend");
+const { extractEmailAddress } = require("../config/email");
 const {
   getSupabase,
   uploadResourceFile,
@@ -103,29 +105,33 @@ const checkSupabase = async () => {
   );
 };
 
-const checkMailjet = async () => {
-  requireValues([
-    "MAILJET_API_KEY",
-    "MAILJET_SECRET_KEY",
-    "MAILJET_SENDER_EMAIL",
-  ]);
-  const credentials = Buffer.from(
-    `${process.env.MAILJET_API_KEY}:${process.env.MAILJET_SECRET_KEY}`,
-  ).toString("base64");
-  const response = await fetch("https://api.mailjet.com/v3/REST/sender?Limit=100", {
-    headers: { Authorization: `Basic ${credentials}` },
+const checkResend = async () => {
+  requireValues(["RESEND_API_KEY", "MAIL_FROM", "MAIL_FROM_NAME"]);
+  const senderDomain = extractEmailAddress(process.env.MAIL_FROM)
+    .split("@")
+    .at(-1)
+    ?.toLowerCase();
+  if (!senderDomain) throw new Error("Configured sender is invalid");
+
+  const client = new Resend(process.env.RESEND_API_KEY);
+  const { data, error } = await client.domains.list({ limit: 100 });
+  if (error) throw error;
+
+  const domain = data?.data?.find((item) => {
+    const verifiedDomain = item.name.toLowerCase();
+    return (
+      senderDomain === verifiedDomain ||
+      senderDomain.endsWith(`.${verifiedDomain}`)
+    );
   });
-  if (!response.ok) throw new Error("Mailjet authentication failed");
-  const body = await response.json();
-  const sender = body.Data?.find(
-    (item) => item.Email?.toLowerCase() === process.env.MAILJET_SENDER_EMAIL.toLowerCase(),
-  );
+  const ready =
+    domain?.status === "verified" && domain.capabilities?.sending === "enabled";
   record(
-    "Mailjet",
-    Boolean(sender && sender.Status === "Active"),
-    sender && sender.Status === "Active"
-      ? "API authentication and active sender verification succeeded"
-      : "API authentication succeeded, but the configured sender is not active",
+    "Resend",
+    ready,
+    ready
+      ? "API authentication and verified sending domain succeeded"
+      : "API authentication succeeded, but the sender domain is not ready for sending",
   );
 };
 
@@ -155,7 +161,7 @@ const run = async () => {
   const checks = [
     ["MongoDB", checkMongo],
     ["Supabase", checkSupabase],
-    ["Mailjet", checkMailjet],
+    ["Resend", checkResend],
     ["JWT / Google OAuth", checkLocalSecurityConfiguration],
   ];
   for (const [name, check] of checks) {

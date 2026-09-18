@@ -7,9 +7,9 @@ const BASE_REQUIRED_ENV = [
 const PRODUCTION_REQUIRED_ENV = [
   "SUPABASE_URL",
   "SUPABASE_SERVICE_KEY",
-  "MAILJET_API_KEY",
-  "MAILJET_SECRET_KEY",
-  "MAILJET_SENDER_EMAIL",
+  "RESEND_API_KEY",
+  "MAIL_FROM",
+  "MAIL_FROM_NAME",
   "GOOGLE_CLIENT_ID",
   "GOOGLE_CLIENT_SECRET",
   "GOOGLE_CALLBACK_URL",
@@ -49,10 +49,12 @@ const validateEnvironment = () => {
     process.env.JWT_SECRET.length < 32
   )
     throw new Error("JWT_SECRET must be at least 32 characters in production");
-  if (
-    process.env.MAILJET_SENDER_EMAIL &&
-    !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(process.env.MAILJET_SENDER_EMAIL)
-  )
-    throw new Error("MAILJET_SENDER_EMAIL must be valid");
+  if (process.env.MAIL_FROM) {
+    const formattedAddress = process.env.MAIL_FROM.trim().match(/<([^<>]+)>$/);
+    const senderEmail = (formattedAddress?.[1] || process.env.MAIL_FROM).trim();
+    if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(senderEmail)) {
+      throw new Error("MAIL_FROM must contain a valid email address");
+    }
+  }
 };
 module.exports = { validateEnvironment };

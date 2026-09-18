@@ -16,7 +16,7 @@ UniBro is a digital campus workspace organized around a student's department and
 
 - **Frontend:** React 19, Vite, React Router, Socket.IO Client, local open-source Fraunces and Manrope fonts
 - **Backend:** Node.js 22+ (containers and CI use Node 24), Express 5, Mongoose, Socket.IO, Passport, JWT, Helmet, rate limiting, and Multer
-- **Services:** MongoDB Atlas, Supabase Storage, Mailjet, and Google OAuth
+- **Services:** MongoDB Atlas, Supabase Storage, Resend, and Google OAuth
 - **Deployment:** separate frontend and backend Vercel projects; Docker images and Docker Compose are also maintained
 
 ```text
@@ -26,7 +26,7 @@ Browser — https://unibro-frontend-one.vercel.app
 API — https://unibro-backend.vercel.app
    ├── MongoDB Atlas (data, Socket.IO adapter, shared presence)
    ├── Supabase Storage
-   ├── Mailjet
+   ├── Resend
    └── Google OAuth
 ```
 
@@ -88,10 +88,9 @@ All `VITE_` values are public. Never place secrets in them.
 | `GOOGLE_CLIENT_ID` | Google OAuth client ID |
 | `GOOGLE_CLIENT_SECRET` | Google OAuth client secret |
 | `GOOGLE_CALLBACK_URL` | Production: `https://unibro-backend.vercel.app/api/auth/google/callback` |
-| `MAILJET_API_KEY` | Mailjet API key |
-| `MAILJET_SECRET_KEY` | Mailjet secret key |
-| `MAILJET_SENDER_EMAIL` | Active verified sender |
-| `MAILJET_SENDER_NAME` | Optional sender label; defaults to `UniBro` |
+| `RESEND_API_KEY` | Backend-only Resend API key |
+| `MAIL_FROM` | Email address on a verified Resend sending domain |
+| `MAIL_FROM_NAME` | Sender display name |
 | `SUPABASE_URL` | Supabase project URL |
 | `SUPABASE_SERVICE_KEY` | Backend-only service-role key |
 | `SUPABASE_BUCKET` | Public resource bucket; normally `unibro-files` |
@@ -172,4 +171,4 @@ The preflight should return `204` with the exact frontend `Access-Control-Allow-
 - Route guards improve navigation, while backend authorization remains authoritative.
 - Upload size, MIME/type, ownership, verification, moderation, and admin rules are enforced server-side.
 - CORS permits only explicitly configured origins; non-browser requests without an Origin remain supported.
-- Supabase service-role, MongoDB, Mailjet, Google, and JWT secrets are excluded from source control.
+- Supabase service-role, MongoDB, Resend, Google, and JWT secrets are excluded from source control.
