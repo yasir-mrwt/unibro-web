@@ -22,8 +22,8 @@ const staffSchema = new mongoose.Schema(
     },
     image: {
       type: String,
-      default:
-        "https://images.unsplash.com/photo-1472099645785-5658abf4ff4e?w=400&h=400&fit=crop",
+      default: "",
+      trim: true,
     },
     courses: [
       {
