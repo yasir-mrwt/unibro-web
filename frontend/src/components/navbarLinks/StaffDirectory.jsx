@@ -1,10 +1,63 @@
 import React, { useCallback, useEffect, useState } from "react";
-import { Edit, Mail, MapPin, Plus, Search, Trash2, X } from "lucide-react";
+import {
+  BookOpen,
+  Clock3,
+  Edit,
+  Mail,
+  MapPin,
+  Phone,
+  Plus,
+  Search,
+  Trash2,
+  X,
+} from "lucide-react";
 import { API_URL } from "../../services/config";
 import { getAuthToken, getStoredUser } from "../../services/authService";
 import { EmptyState, ErrorState, LoadingState } from "../ui/States";
 import { useToast } from "../ui/ToastContext";
 import AddEditStaffModal from "./AddEditStaffModal";
+
+const LEGACY_PLACEHOLDER =
+  "https://images.unsplash.com/photo-1472099645785-5658abf4ff4e?w=400&h=400&fit=crop";
+
+const initialsFor = (name = "") =>
+  name
+    .trim()
+    .split(/\s+/)
+    .map((part) => part[0])
+    .filter(Boolean)
+    .slice(0, 2)
+    .join("")
+    .toUpperCase() || "U";
+
+function StaffPortrait({ person }) {
+  const [failed, setFailed] = useState(false);
+  const hasImage = Boolean(
+    person.image?.trim() && person.image.trim() !== LEGACY_PLACEHOLDER,
+  );
+
+  if (!hasImage || failed) {
+    return (
+      <div
+        className="staff-avatar-fallback"
+        role="img"
+        aria-label={`${person.name} profile image unavailable`}
+      >
+        <span>{initialsFor(person.name)}</span>
+      </div>
+    );
+  }
+
+  return (
+    <img
+      className="staff-photo"
+      src={person.image}
+      alt={`${person.name} profile`}
+      loading="lazy"
+      onError={() => setFailed(true)}
+    />
+  );
+}
 
 export default function StaffDirectory() {
   const { notify } = useToast();
@@ -123,53 +176,65 @@ export default function StaffDirectory() {
         />
       ) : (
         <>
-          <div className="resource-list">
+          <div className="staff-directory-grid">
             {staff.map((person) => (
-              <article className="resource-row" key={person._id}>
-                <span className="icon-box">
-                  {person.name
-                    .split(" ")
-                    .map((part) => part[0])
-                    .slice(0, 2)
-                    .join("")}
-                </span>
-                <div>
-                  <h3>{person.name}</h3>
-                  <div className="resource-meta">
-                    <span>{person.qualification}</span>
-                    <span>{person.department}</span>
-                    <span>
-                      <MapPin size={13} />
-                      {person.office}
-                    </span>
-                    <span>{person.courses?.slice(0, 2).join(", ")}</span>
+              <article className="staff-card" key={person._id}>
+                <div className="staff-card-main">
+                  <div className="staff-portrait">
+                    <StaffPortrait
+                      key={person.image || "fallback"}
+                      person={person}
+                    />
+                  </div>
+                  <div className="staff-identity">
+                    <span className="staff-department">{person.department}</span>
+                    <h2>{person.name}</h2>
+                    <p className="staff-designation">{person.qualification}</p>
                   </div>
                 </div>
-                <div className="cluster">
-                  <a
-                    className="btn btn-secondary btn-sm"
-                    href={`mailto:${person.email}`}
-                  >
-                    <Mail size={15} /> Email
-                  </a>
-                  {isAdmin && (
-                    <>
-                      <button
-                        className="btn btn-ghost btn-icon btn-sm"
-                        onClick={() => setEditing(person)}
-                        aria-label={`Edit ${person.name}`}
-                      >
-                        <Edit size={16} />
-                      </button>
-                      <button
-                        className="btn btn-danger btn-icon btn-sm"
-                        onClick={() => setDeleteTarget(person)}
-                        aria-label={`Delete ${person.name}`}
-                      >
-                        <Trash2 size={16} />
-                      </button>
-                    </>
+                <dl className="staff-details">
+                  <div>
+                    <dt><MapPin size={15} /> Office</dt>
+                    <dd>{person.office}</dd>
+                  </div>
+                  <div>
+                    <dt><Clock3 size={15} /> Counselling</dt>
+                    <dd>{person.counsellingHours}</dd>
+                  </div>
+                  {person.courses?.length > 0 && (
+                    <div className="staff-detail-wide">
+                      <dt><BookOpen size={15} /> Courses</dt>
+                      <dd>{person.courses.slice(0, 3).join(", ")}</dd>
+                    </div>
                   )}
+                </dl>
+                <div className="staff-card-actions">
+                  <div className="staff-contact-actions">
+                    <a href={`mailto:${person.email}`}>
+                      <Mail size={15} /> <span>{person.email}</span>
+                    </a>
+                    {person.phoneNumber && (
+                      <a href={`tel:${person.phoneNumber}`}>
+                        <Phone size={15} /> <span>{person.phoneNumber}</span>
+                      </a>
+                    )}
+                  </div>
+                  {isAdmin && <div className="staff-admin-actions">
+                    <button
+                      className="btn btn-ghost btn-icon btn-sm"
+                      onClick={() => setEditing(person)}
+                      aria-label={`Edit ${person.name}`}
+                    >
+                      <Edit size={16} />
+                    </button>
+                    <button
+                      className="btn btn-danger btn-icon btn-sm"
+                      onClick={() => setDeleteTarget(person)}
+                      aria-label={`Delete ${person.name}`}
+                    >
+                      <Trash2 size={16} />
+                    </button>
+                  </div>}
                 </div>
               </article>
             ))}
