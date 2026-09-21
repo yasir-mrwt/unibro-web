@@ -182,7 +182,7 @@ export default function Home() {
         </section>
       </div>
       <footer className="brand-footer">
-        <div className="container footer-grid"><div><Brand light /><p>Useful university material, organized around real academic context.</p></div><nav aria-label="Footer navigation"><a href="#how-it-works">How it works</a><a href="#what-you-get">What you get</a><Link to="/about">About</Link></nav><span>© {new Date().getFullYear()} UniBro</span></div>
+        <div className="container footer-grid"><div><Brand light /><p>Useful university material, organized around real academic context.</p></div><nav aria-label="Footer navigation"><a href="#how-it-works">How it works</a><a href="#what-you-get">What you get</a><Link to="/about">About</Link></nav><span>© {new Date().getFullYear()} UniBro. Created by <a href="https://yasirmarwat.site" target="_blank" rel="noopener">Yasir Marwat</a>.</span></div>
       </footer>
     </>
   );
