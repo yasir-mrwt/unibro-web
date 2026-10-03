@@ -1,0 +1,39 @@
+name: Supabase keep-alive
+
+on:
+  schedule:
+    - cron: "17 3 * * *"
+  workflow_dispatch:
+
+permissions: {}
+
+jobs:
+  keep-alive:
+    name: Read one Supabase storage record
+    runs-on: ubuntu-latest
+    timeout-minutes: 2
+    steps:
+      - name: Query Supabase directly
+        env:
+          SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
+          SUPABASE_PUBLIC_KEY: ${{ secrets.SUPABASE_PUBLIC_KEY }}
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          : "${SUPABASE_URL:?Missing SUPABASE_URL repository secret}"
+          : "${SUPABASE_PUBLIC_KEY:?Missing SUPABASE_PUBLIC_KEY repository secret}"
+
+          request_headers=(--header "apikey: ${SUPABASE_PUBLIC_KEY}")
+          if [[ "${SUPABASE_PUBLIC_KEY}" == eyJ* ]]; then
+            request_headers+=(--header "Authorization: Bearer ${SUPABASE_PUBLIC_KEY}")
+          fi
+
+          curl --fail --silent --show-error \
+            --max-time 30 \
+            --request POST \
+            "${request_headers[@]}" \
+            --header "Content-Type: application/json" \
+            --data '{"limit":1,"offset":0,"prefix":""}' \
+            --output /dev/null \
+            "${SUPABASE_URL%/}/storage/v1/object/list/unibro-files"
